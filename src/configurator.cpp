@@ -83,14 +83,14 @@ void Configurator::setupUi()
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static QFormLayout* form(QWidget* p) { auto* f=new QFormLayout(p); f->setContentsMargins(8,8,8,8); return f; }
-static void browse(QLineEdit* e, const QString& title, const QString& filter={}, bool dir=false) {
-    auto* b=new QPushButton(QObject::tr("浏览...")); QObject::connect(b, &QPushButton::clicked, e, [=](){
-        QString s = dir ? QFileDialog::getExistingDirectory(e->parentWidget(), title)
-                        : QFileDialog::getOpenFileName(e->parentWidget(), title, {}, filter);
+static void addBrowse(QFormLayout* f, QLineEdit* e, const QString& title, bool dir=false) {
+    auto* b=new QPushButton(QObject::tr("浏览..."));
+    QObject::connect(b, &QPushButton::clicked, e, [=](){
+        QString s = dir ? QFileDialog::getExistingDirectory(nullptr, title)
+                        : QFileDialog::getOpenFileName(nullptr, title, {}, {});
         if (!s.isEmpty()) e->setText(QDir::toNativeSeparators(s));
     });
-    auto* p=qobject_cast<QFormLayout*>(e->parentWidget()->layout());
-    if(p) p->addRow({}, b);
+    f->addRow({}, b);
 }
 
 QWidget* Configurator::buildTabBasic()
@@ -119,7 +119,7 @@ QWidget* Configurator::buildTabInstall()
     m_exe    = new QLineEdit(QStringLiteral("MyApp.exe"));     f->addRow(tr("主程序:"), m_exe);
     m_license = new QLineEdit; m_license->setPlaceholderText(tr("许可协议文件（可选）"));
     f->addRow(tr("许可协议:"), m_license);
-    browse(m_license, tr("选择许可协议"), tr("文本(*.txt *.rtf);;所有(*)"));
+    addBrowse(f, m_license, tr("选择许可协议"));
     m_reqAdmin  = new QCheckBox(tr("强制管理员权限")); f->addRow({}, m_reqAdmin);
     m_allowPath = new QCheckBox(tr("允许用户修改安装路径")); m_allowPath->setChecked(true); f->addRow({}, m_allowPath);
     return w;
@@ -130,7 +130,7 @@ QWidget* Configurator::buildTabFiles()
     auto* w = new QWidget; auto* f = form(w);
     m_filesDir = new QLineEdit; m_filesDir->setPlaceholderText(tr("待打包文件目录"));
     f->addRow(tr("文件目录:"), m_filesDir);
-    browse(m_filesDir, tr("选择文件目录"), {}, true);
+    addBrowse(f, m_filesDir, tr("选择文件目录"), true);
     m_fileMode = new QComboBox; m_fileMode->addItems({QStringLiteral("mirror"), QStringLiteral("mapping")});
     f->addRow(tr("模式:"), m_fileMode);
     m_overwrite = new QComboBox; m_overwrite->addItems({tr("询问"), tr("总是覆盖"), tr("跳过")});
@@ -183,10 +183,10 @@ void Configurator::onAddShortcut()
 QWidget* Configurator::buildTabAppearance()
 {
     auto* w = new QWidget; auto* f = form(w);
-    m_icon       = new QLineEdit; f->addRow(tr("窗口图标:"), m_icon); browse(m_icon, tr("选择图标"), tr("图标(*.ico)"));
-    m_setupIcon  = new QLineEdit; f->addRow(tr("Setup 图标:"), m_setupIcon); browse(m_setupIcon, tr("选择图标"), tr("图标(*.ico)"));
-    m_uninstIcon = new QLineEdit; f->addRow(tr("卸载图标:"), m_uninstIcon); browse(m_uninstIcon, tr("选择图标"), tr("图标(*.ico)"));
-    m_banner     = new QLineEdit; f->addRow(tr("横幅图片:"), m_banner); browse(m_banner, tr("选择图片"), tr("图片(*.png *.bmp)"));
+    m_icon       = new QLineEdit; f->addRow(tr("窗口图标:"), m_icon); addBrowse(f, m_icon, tr("选择图标"));
+    m_setupIcon  = new QLineEdit; f->addRow(tr("Setup 图标:"), m_setupIcon); addBrowse(f, m_setupIcon, tr("选择图标"));
+    m_uninstIcon = new QLineEdit; f->addRow(tr("卸载图标:"), m_uninstIcon); addBrowse(f, m_uninstIcon, tr("选择图标"));
+    m_banner     = new QLineEdit; f->addRow(tr("横幅图片:"), m_banner); addBrowse(f, m_banner, tr("选择图片"));
     m_bgColor    = new QLineEdit(QStringLiteral("#FFFFFF")); f->addRow(tr("背景色:"), m_bgColor);
     m_uiStyle    = new QComboBox;
     m_uiStyle->addItem(tr("向导样式（分步）"), QStringLiteral("wizard"));
@@ -312,7 +312,7 @@ QWidget* Configurator::buildTabOutput()
     auto* f = new QFormLayout; f->setContentsMargins(8,8,8,8);
     m_output = new QLineEdit(QDir::toNativeSeparators(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("output"))));
     f->addRow(tr("输出目录:"), m_output);
-    browse(m_output, tr("选择输出目录"), {}, true);
+    addBrowse(f, m_output, tr("选择输出目录"), true);
     lay->addLayout(f);
 
     // ── Templates ────────────────────────────────────────────────────────
