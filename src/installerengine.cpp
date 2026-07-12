@@ -688,20 +688,52 @@ void InstallerEngine::writeFileAssociations(const QString& installDir)
 
 void InstallerEngine::deployUninstaller(const QString& installDir)
 {
-    QString self = QCoreApplication::applicationFilePath();
-    QString target = QDir(installDir).absoluteFilePath(QStringLiteral("Uninstall.exe"));
-    if (QFile::exists(target)) QFile::remove(target);
-    QFile::copy(self, target);
+    const QString selfPath   = QCoreApplication::applicationFilePath();
+    const QString targetPath = QDir(installDir).absoluteFilePath(
+        QStringLiteral("Uninstall.exe"));
 
-    QJsonObject cfg;
-    cfg[QStringLiteral("app_name")]    = appName();
-    cfg[QStringLiteral("install_dir")] = installDir;
-    cfg[QStringLiteral("version")]     = version();
+    // Remove old uninstaller if present
+    if (QFile::exists(targetPath))
+        QFile::remove(targetPath);
+
+    // Use Windows CopyFileW — handles running exe correctly (CoW on NTFS)
+    bool copied = false;
+#ifdef Q_OS_WIN
+    copied = CopyFileW(reinterpret_cast<LPCWSTR>(selfPath.utf16()),
+                       reinterpret_cast<LPCWSTR>(targetPath.utf16()), FALSE);
+#else
+    copied = QFile::copy(selfPath, targetPath);
+#endif
+
+    if (!copied) {
+        // Fallback: read + write manually
+        QFile src(selfPath);
+        if (src.open(QIODevice::ReadOnly)) {
+            QFile dst(targetPath);
+            if (dst.open(QIODevice::WriteOnly)) {
+                dst.write(src.readAll());
+                dst.close();
+                copied = true;
+            }
+            src.close();
+        }
+    }
+
+    // Write uninstall.json always (even if copy failed, the registry entry
+    // pointing to it is still useful for manual fix)
+    QJsonObject config;
+    config[QStringLiteral("app_name")]    = appName();
+    config[QStringLiteral("install_dir")] = installDir;
+    config[QStringLiteral("version")]     = version();
+
     QFile cf(QDir(installDir).absoluteFilePath(QStringLiteral("uninstall.json")));
     if (cf.open(QIODevice::WriteOnly)) {
-        cf.write(QJsonDocument(cfg).toJson(QJsonDocument::Indented));
+        cf.write(QJsonDocument(config).toJson(QJsonDocument::Indented));
         cf.close();
     }
+
+    if (!copied)
+        emit statusChanged(tr("警告：无法复制卸载程序到安装目录"));
 }
 
 // ── Uninstall info ───────────────────────────────────────────────────────────
