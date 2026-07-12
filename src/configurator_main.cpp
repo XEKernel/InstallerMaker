@@ -79,7 +79,7 @@ int main(int argc, char* argv[])
                            + QStringLiteral("/InstallerMaker_build");
         QDir(tmpBuild).removeRecursively(); QDir().mkpath(tmpBuild);
         QString srcDir  = QDir(QCoreApplication::applicationDirPath())
-                              .absoluteFilePath(QStringLiteral(".."));
+                              .absoluteFilePath(QStringLiteral("../.."));
 
         if (!run(tmpBuild, QStringLiteral("cmake"),
                  {QStringLiteral("-G"), QStringLiteral("Ninja"),

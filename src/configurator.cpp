@@ -722,7 +722,7 @@ bool Configurator::generatePackageJson(const QString& packageDir)
 bool Configurator::runBuild(const QString& packageDir, const QString& outputDir)
 {
     m_progressBar->setVisible(true); m_generateBtn->setEnabled(false); m_log->clear(); QApplication::processEvents();
-    QString src=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral(".."));
+    QString src=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../.."));
     QString tmp=QStandardPaths::writableLocation(QStandardPaths::TempLocation)+"/InstallerMaker_build";
     QDir(tmp).removeRecursively(); QDir().mkpath(tmp);
 
