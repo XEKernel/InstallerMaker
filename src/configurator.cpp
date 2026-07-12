@@ -169,7 +169,8 @@ QWidget* Configurator::buildTabShortcuts()
 
 void Configurator::onAddShortcut()
 {
-    auto* row = new QHBoxLayout; row->setSpacing(4);
+    auto* wrap = new QWidget;  // parent widget for clean cascading delete
+    auto* row  = new QHBoxLayout(wrap); row->setSpacing(4); row->setContentsMargins(0,0,0,0);
     auto* t = new QLineEdit(QStringLiteral("MyApp.exe")); t->setPlaceholderText(tr("目标"));
     auto* l = new QComboBox; l->addItems({QStringLiteral("Desktop"), QStringLiteral("StartMenu"), QStringLiteral("Startup")});
     auto* nm = new QLineEdit; nm->setPlaceholderText(tr("名称"));
@@ -183,13 +184,15 @@ void Configurator::onAddShortcut()
     row->addWidget(t); row->addWidget(l); row->addWidget(nm); row->addWidget(d);
     row->addWidget(a); row->addWidget(wd); row->addWidget(ic); row->addWidget(sf);
     row->addWidget(ad); row->addWidget(del);
-    m_scLayout->addLayout(row);
+    m_scLayout->addWidget(wrap);
+
     int idx = static_cast<int>(m_scRows.size());
     m_scRows.append({t,l,nm,d,a,wd,ic,sf,ad});
-    connect(del, &QPushButton::clicked, this, [=](){
-        m_scRows[idx] = {}; m_scLayout->removeItem(row);
-        while (row->count()) { auto* it = row->takeAt(0); delete it->widget(); delete it; }
-        delete row;
+
+    connect(del, &QPushButton::clicked, this, [this, wrap, idx](){
+        m_scRows[idx] = {};
+        m_scLayout->removeWidget(wrap);
+        wrap->deleteLater();
     });
 }
 
@@ -541,11 +544,15 @@ void Configurator::applyFormData(const QJsonObject& o)
     }
     m_filesDir->setText(s(o["_files_source"]));
 
-    // shortcuts — reload from saved data (clear existing, recreate)
-    for(int i=m_scRows.size()-1; i>=0; i--){ m_scRows[i]={}; }
-    // Clear layout
-    while(m_scLayout->count()){ auto* it=m_scLayout->takeAt(0); if(it->widget()){ delete it->widget(); } else if(it->layout()){ while(it->layout()->count()){ auto* c=it->layout()->takeAt(0); delete c->widget(); delete c; } delete it->layout(); } delete it; }
+    // shortcuts — clear existing, recreate from template
+    for (auto& r : m_scRows) r = {};
     m_scRows.clear();
+    // Delete all wrapper widgets in the shortcut layout
+    while (m_scLayout->count() > 0) {
+        QLayoutItem* it = m_scLayout->takeAt(0);
+        if (it->widget()) it->widget()->deleteLater();
+        delete it;
+    }
 
     QJsonArray scs=o["shortcuts"].toArray();
     for(const auto& v:scs){
