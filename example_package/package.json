@@ -1,0 +1,23 @@
+{
+    "installer": {
+        "name": "MyApp",
+        "version": "1.0.0",
+        "publisher": "MyCompany",
+        "default_install_folder": "MyApp",
+        "default_install_root": "$LOCALAPPDATA$",
+        "main_executable": "MyApp.exe",
+        "uninstall_icon": "uninstall.ico"
+    },
+    "shortcuts": [
+        { "target": "MyApp.exe", "location": "Desktop" },
+        { "target": "MyApp.exe", "location": "StartMenu" }
+    ],
+    "registry": {
+        "HKEY_CURRENT_USER\\Software\\MyApp": {
+            "Version": "{VERSION}",
+            "Path": "{INSTALL_DIR}"
+        }
+    },
+    "license_file": "LICENSE.txt",
+    "finish_message": "MyApp 安装完成！"
+}
