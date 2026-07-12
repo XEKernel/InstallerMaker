@@ -24,6 +24,7 @@
 #include <QProcess>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTabWidget>
@@ -103,6 +104,18 @@ QWidget* Configurator::buildTabBasic()
     m_copyright = new QLineEdit(QStringLiteral("Copyright (C) 2026")); f->addRow(tr("版权:"), m_copyright);
     m_website   = new QLineEdit(); m_website->setPlaceholderText(tr("https://...")); f->addRow(tr("网址:"), m_website);
     m_email     = new QLineEdit(); m_email->setPlaceholderText(tr("support@..."));   f->addRow(tr("支持邮箱:"), m_email);
+
+    // Auto-sync name → short_name, folder, exe
+    connect(m_name, &QLineEdit::textChanged, this, [this](const QString& t) {
+        QString n = t.trimmed();
+        QString sn = n.toLower().replace(QRegularExpression(QStringLiteral("[^a-z0-9_]")), QStringLiteral("_"));
+        if (m_shortName->text().isEmpty() || m_shortName->text() == m_name->text().toLower().replace(QRegularExpression(QStringLiteral("[^a-z0-9_]")), QStringLiteral("_")))
+            m_shortName->setText(sn);
+        if (m_folder->text().isEmpty() || m_folder->text() == sn)
+            m_folder->setText(n.isEmpty() ? QString() : n);
+        if (m_exe->text().isEmpty() || m_exe->text() == sn + QStringLiteral(".exe"))
+            m_exe->setText(n.isEmpty() ? QString() : n + QStringLiteral(".exe"));
+    });
     return w;
 }
 
@@ -499,10 +512,12 @@ QJsonObject Configurator::collectFormData() const
 
 void Configurator::applyFormData(const QJsonObject& o)
 {
-    auto s = [](const QJsonValue& v){ return v.toString(); };
+    if (o.isEmpty()) return;
+    auto s = [](const QJsonValue& v){ return v.isString() ? v.toString() : QString(); };
     auto b = [](const QJsonValue& v, bool d){ return v.isBool() ? v.toBool() : d; };
 
     QJsonObject inst = o["installer"].toObject();
+    if (inst.isEmpty()) return;
     m_name->setText(s(inst["name"])); m_shortName->setText(s(inst["short_name"]));
     m_version->setText(s(inst["version"])); m_publisher->setText(s(inst["publisher"]));
     m_copyright->setText(s(inst["copyright"])); m_website->setText(s(inst["website"]));

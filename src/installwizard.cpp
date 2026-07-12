@@ -332,7 +332,7 @@ QWidget* InstallWizard::buildPathPage()
 QWidget* InstallWizard::buildProgressPage()
 {
     auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
+    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(10);
     l->addWidget(new QLabel(tr("<b>正在安装...</b>"), p));
 
     m_statusLabel = new QLabel(tr("正在准备..."), p);
@@ -340,8 +340,24 @@ QWidget* InstallWizard::buildProgressPage()
     l->addWidget(m_statusLabel);
 
     m_progressBar = new QProgressBar(p); m_progressBar->setRange(0, 100);
-    m_progressBar->setValue(0); m_progressBar->setMinimumHeight(20);
-    l->addWidget(m_progressBar); l->addStretch(); return p;
+    m_progressBar->setValue(0); m_progressBar->setMinimumHeight(18);
+    l->addWidget(m_progressBar);
+
+    // Detail toggle
+    auto* detailBtn = new QPushButton(tr("显示详情 ▸"), p);
+    detailBtn->setFlat(true);
+    m_detailLog = new QTextEdit(p);
+    m_detailLog->setReadOnly(true); m_detailLog->setVisible(false);
+    m_detailLog->setMaximumHeight(120);
+    connect(detailBtn, &QPushButton::clicked, this, [detailBtn, this]() {
+        bool show = !m_detailLog->isVisible();
+        m_detailLog->setVisible(show);
+        detailBtn->setText(show ? tr("隐藏详情 ▾") : tr("显示详情 ▸"));
+    });
+    l->addWidget(detailBtn);
+    l->addWidget(m_detailLog);
+
+    l->addStretch(); return p;
 }
 
 QWidget* InstallWizard::buildFinishPage()
@@ -479,19 +495,16 @@ void InstallWizard::refreshStepIndicator()
 
         auto* icon = new QLabel(this); icon->setFixedWidth(20); icon->setAlignment(Qt::AlignCenter);
         QString color;
-        if (i < m_currentStep)      { icon->setText(QStringLiteral("\u2713")); color = QStringLiteral("#4caf50"); }
-        else if (i == m_currentStep){ icon->setText(QStringLiteral("\u25CF")); color = QStringLiteral("#2196f3"); }
-        else                        { icon->setText(QStringLiteral("\u25CB")); color = QStringLiteral("#666"); }
+        if (i == m_currentStep)      { icon->setText(QStringLiteral("\u25CF")); color = QStringLiteral("#2196f3"); }
+        else                         { icon->setText(QStringLiteral("\u25CB")); color = QStringLiteral("#666"); }
         icon->setStyleSheet(QStringLiteral("color:%1;font-size:14px;font-weight:bold;").arg(color));
         row->addWidget(icon);
 
         auto* label = new QLabel(steps[i], this);
         if (i == m_currentStep)
             label->setStyleSheet(QStringLiteral("color:#fff;font-weight:bold;"));
-        else if (i < m_currentStep)
-            label->setStyleSheet(QStringLiteral("color:#aaa;"));
         else
-            label->setStyleSheet(QStringLiteral("color:#666;"));
+            label->setStyleSheet(QStringLiteral("color:#888;"));
         row->addWidget(label, 1); row->addStretch();
         m_stepLayout->addLayout(row);
     }
@@ -545,7 +558,11 @@ void InstallWizard::onProgressChanged(int percent)
 void InstallWizard::onStatusChanged(const QString& text)
 {
     if (m_style == OneClick) { if (m_ocStatusLabel) m_ocStatusLabel->setText(text); }
-    else { if (m_statusLabel) m_statusLabel->setText(text); }
+    else {
+        if (m_statusLabel) m_statusLabel->setText(text);
+        if (m_detailLog && m_detailLog->isVisible())
+            m_detailLog->append(text);
+    }
 }
 
 void InstallWizard::onFinished(bool success, const QString& error)

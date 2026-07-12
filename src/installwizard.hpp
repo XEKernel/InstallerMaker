@@ -85,6 +85,7 @@ private:
     QProgressBar* m_progressBar  = nullptr;
     QLabel*       m_statusLabel  = nullptr;
     QCheckBox*    m_runCheckBox  = nullptr;
+    QTextEdit*    m_detailLog    = nullptr;  // progress page detail log
 
     // ── One-click widgets ────────────────────────────────────────────────
     QWidget*      m_oneClickPage = nullptr;
