@@ -811,7 +811,7 @@ void InstallerEngine::uninstall(const QString& installDir)
     { QDirIterator it(installDir, QDir::Files, QDirIterator::Subdirectories);
       while (it.hasNext()) { it.next(); ++fileCount; } }
 
-    const int totalSteps = fileCount + 4;
+    const int totalSteps = fileCount + 5;
     int step = 0;
     emit statusChanged(tr("正在准备卸载...")); emit progressChanged(0);
 
@@ -824,6 +824,7 @@ void InstallerEngine::uninstall(const QString& installDir)
     removeRegistry(appName()); removeEnvironment(appName()); removeFileAssociations();
 
     step++; emit statusChanged(tr("正在清理安装目录...")); emit progressChanged(step * 100 / totalSteps);
+    // Remove empty directories bottom-up
     QDir(installDir).removeRecursively();
 
     emit progressChanged(100); emit statusChanged(tr("卸载完成！"));
@@ -832,18 +833,46 @@ void InstallerEngine::uninstall(const QString& installDir)
 
 void InstallerEngine::removeFiles(const QString& installDir, int& step, int totalSteps)
 {
+    // Files to skip (self-deleting): Uninstall.exe, uninstall.json
+    const QString selfExe    = QDir::toNativeSeparators(QCoreApplication::applicationFilePath());
+    const QString selfExeLower = selfExe.toLower();
+
+    QStringList delayedDelete;
+    int skipped = 0;
+
     QDirIterator it(installDir, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         it.next();
-        if (!QFile::remove(it.filePath())) {
-            emit finished(false, tr("无法删除文件:\n%1").arg(it.filePath()));
+        QString fp = QDir::toNativeSeparators(it.filePath());
+
+        // Skip the running uninstaller and its config
+        if (fp.toLower() == selfExeLower) { skipped++; continue; }
+        if (fp.endsWith(QStringLiteral("uninstall.json"), Qt::CaseInsensitive)) { skipped++; continue; }
+
+        if (!QFile::remove(fp)) {
+            // Schedule for reboot cleanup
+#ifdef Q_OS_WIN
+            MoveFileExW(reinterpret_cast<LPCWSTR>(fp.utf16()), nullptr,
+                        MOVEFILE_DELAY_UNTIL_REBOOT);
+            delayedDelete.append(fp);
+#else
+            emit finished(false, tr("无法删除文件:\n%1").arg(fp));
             return;
+#endif
         }
         step++;
         emit progressChanged(step * 100 / totalSteps);
-        emit statusChanged(tr("正在删除: %1").arg(
-            QDir(installDir).relativeFilePath(it.filePath())));
+        emit statusChanged(tr("正在删除: %1").arg(QDir(installDir).relativeFilePath(fp)));
     }
+
+    // Schedule self-deletion (Uninstall.exe) on reboot
+#ifdef Q_OS_WIN
+    MoveFileExW(reinterpret_cast<LPCWSTR>(selfExe.utf16()), nullptr,
+                MOVEFILE_DELAY_UNTIL_REBOOT);
+#endif
+
+    if (!delayedDelete.isEmpty())
+        emit statusChanged(tr("注意：%1 个文件将在重启后删除").arg(delayedDelete.size()));
 }
 
 void InstallerEngine::removeShortcuts(const QString& appName)
