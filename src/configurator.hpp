@@ -12,6 +12,7 @@ class QProgressBar;
 class QVBoxLayout;
 class QTabWidget;
 class QSpinBox;
+class QListWidget;
 
 class Configurator : public QDialog {
     Q_OBJECT
@@ -26,6 +27,8 @@ private slots:
     void onAddRegEntry();
     void onAddShortcut();
     void onAddFileAssoc();
+    void onSaveTemplate();
+    void onLoadTemplate();
     void onGenerate();
 
 private:
@@ -47,6 +50,10 @@ private:
 
     bool generatePackageJson(const QString& packageDir);
     bool runBuild(const QString& packageDir, const QString& outputDir);
+    QJsonObject collectFormData() const;
+    void applyFormData(const QJsonObject& pkg);
+    QString templateDir() const;
+    void refreshTemplateList();
 
     // ── Tab 1: Basic ─────────────────────────────────────────────────────
     QLineEdit* m_name       = nullptr;
@@ -134,4 +141,7 @@ private:
     QPushButton* m_generateBtn = nullptr;
     QProgressBar* m_progressBar = nullptr;
     QTextEdit* m_log           = nullptr;
+
+    // ── Template management ───────────────────────────────────────────────
+    QListWidget* m_templateList = nullptr;
 };

@@ -13,11 +13,13 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QProcess>
 #include <QProgressBar>
@@ -300,10 +302,46 @@ QWidget* Configurator::buildTabAdvanced()
 
 QWidget* Configurator::buildTabOutput()
 {
-    auto* w = new QWidget; auto* f = form(w);
+    auto* w = new QWidget;
+    auto* lay = new QVBoxLayout(w);
+
+    auto* f = new QFormLayout; f->setContentsMargins(8,8,8,8);
     m_output = new QLineEdit(QDir::toNativeSeparators(QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("output"))));
     f->addRow(tr("输出目录:"), m_output);
     browse(m_output, tr("选择输出目录"), {}, true);
+    lay->addLayout(f);
+
+    // ── Templates ────────────────────────────────────────────────────────
+    auto* tplGrp = new QGroupBox(tr("模板"), w);
+    auto* tplLay = new QVBoxLayout(tplGrp);
+
+    m_templateList = new QListWidget(w);
+    m_templateList->setMaximumHeight(100);
+    tplLay->addWidget(m_templateList);
+
+    auto* tplBtns = new QHBoxLayout;
+    auto* saveBtn  = new QPushButton(tr("保存当前为模板"));
+    auto* loadBtn  = new QPushButton(tr("加载选中模板"));
+    auto* delBtn   = new QPushButton(tr("删除选中模板"));
+    tplBtns->addWidget(saveBtn);
+    tplBtns->addWidget(loadBtn);
+    tplBtns->addWidget(delBtn);
+    tplBtns->addStretch();
+    tplLay->addLayout(tplBtns);
+
+    connect(saveBtn, &QPushButton::clicked, this, &Configurator::onSaveTemplate);
+    connect(loadBtn, &QPushButton::clicked, this, &Configurator::onLoadTemplate);
+    connect(delBtn,  &QPushButton::clicked, this, [this]() {
+        auto* item = m_templateList->currentItem();
+        if (!item) return;
+        QFile::remove(templateDir() + "/" + item->text() + ".json");
+        refreshTemplateList();
+    });
+
+    lay->addWidget(tplGrp);
+    lay->addStretch();
+
+    refreshTemplateList();
     return w;
 }
 
@@ -316,6 +354,212 @@ void Configurator::onBrowseFiles()
 void Configurator::onBrowseLicense() { onBrowseFiles(); }
 void Configurator::onBrowseIcon() { QString f=QFileDialog::getOpenFileName(this,tr("选择图标"),{},tr("图标(*.ico);;所有(*)")); if(!f.isEmpty()) m_icon->setText(QDir::toNativeSeparators(f)); }
 void Configurator::onBrowseOutput() { QString d=QFileDialog::getExistingDirectory(this,tr("选择输出目录")); if(!d.isEmpty()) m_output->setText(QDir::toNativeSeparators(d)); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Templates
+// ═══════════════════════════════════════════════════════════════════════════════
+
+QString Configurator::templateDir() const
+{
+    QString d = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                + QStringLiteral("/templates");
+    QDir().mkpath(d);
+    return d;
+}
+
+void Configurator::refreshTemplateList()
+{
+    m_templateList->clear();
+    QDir dir(templateDir());
+    for (const auto& fi : dir.entryInfoList({QStringLiteral("*.json")}, QDir::Files, QDir::Name)) {
+        m_templateList->addItem(fi.completeBaseName());
+    }
+}
+
+void Configurator::onSaveTemplate()
+{
+    bool ok = false;
+    QString name = QInputDialog::getText(this, tr("保存模板"),
+        tr("模板名称:"), QLineEdit::Normal,
+        m_name->text().trimmed(), &ok);
+    if (!ok || name.isEmpty()) return;
+
+    QJsonObject data = collectFormData();
+    QFile f(templateDir() + "/" + name + ".json");
+    if (!f.open(QIODevice::WriteOnly)) {
+        QMessageBox::warning(this, tr("错误"), tr("无法保存模板。"));
+        return;
+    }
+    f.write(QJsonDocument(data).toJson(QJsonDocument::Indented));
+    f.close();
+    refreshTemplateList();
+}
+
+void Configurator::onLoadTemplate()
+{
+    auto* item = m_templateList->currentItem();
+    if (!item) {
+        QMessageBox::information(this, tr("提示"), tr("请先在模板列表中选中一个模板。"));
+        return;
+    }
+
+    QFile f(templateDir() + "/" + item->text() + ".json");
+    if (!f.open(QIODevice::ReadOnly)) return;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    f.close();
+    if (doc.isNull()) return;
+
+    applyFormData(doc.object());
+    refreshTemplateList();
+}
+
+QJsonObject Configurator::collectFormData() const
+{
+    QJsonObject o;
+    auto s = [](const QString& x){ return x.trimmed(); };
+
+    QJsonObject inst;
+    inst["name"]=s(m_name->text()); inst["version"]=s(m_version->text()); inst["publisher"]=s(m_publisher->text());
+    inst["short_name"]=s(m_shortName->text()); inst["copyright"]=s(m_copyright->text());
+    inst["website"]=s(m_website->text()); inst["support_email"]=s(m_email->text());
+    inst["default_install_root"]=m_rootCombo->currentData().toString();
+    inst["default_install_folder"]=s(m_folder->text()); inst["main_executable"]=s(m_exe->text());
+    inst["license_file"]=s(m_license->text());
+    inst["requires_admin"]=m_reqAdmin->isChecked(); inst["allow_change_path"]=m_allowPath->isChecked();
+    inst["icon"]=s(m_icon->text()); inst["setup_icon"]=s(m_setupIcon->text());
+    inst["uninstall_icon"]=s(m_uninstIcon->text()); inst["banner_image"]=s(m_banner->text());
+    inst["background_color"]=s(m_bgColor->text());
+    inst["welcome_title"]=s(m_welcomeTitle->text()); inst["welcome_text"]=s(m_welcomeText->text());
+    inst["finish_title"]=s(m_finishTitle->text());
+    o["installer"]=inst;
+    o["finish_message"]=s(m_finishMsg->text());
+
+    QJsonObject fs;
+    fs["mode"]=m_fileMode->currentText();
+    fs["overwrite"]=(m_overwrite->currentIndex()==1)?"always":(m_overwrite->currentIndex()==2)?"never":"ask";
+    if(!s(m_exclude->text()).isEmpty()){ QJsonArray a; for(auto& p:s(m_exclude->text()).split(',')){ QString t=p.trimmed(); if(!t.isEmpty()) a.append(t); } fs["exclude"]=a; }
+    o["files_strategy"]=fs;
+    o["_files_source"]=s(m_filesDir->text());
+    o["_license_source"]=s(m_license->text());
+
+    // Store shortcuts/registry/assoc as-is from current rows
+    QJsonArray scs;
+    for(const auto& r:m_scRows){ if(!r.target||s(r.target->text()).isEmpty()) continue;
+        QJsonObject sc; sc["target"]=s(r.target->text()); sc["location"]=r.location->currentText();
+        if(!s(r.name->text()).isEmpty()) sc["name"]=s(r.name->text());
+        if(!s(r.desc->text()).isEmpty()) sc["description"]=s(r.desc->text());
+        if(!s(r.args->text()).isEmpty()) sc["arguments"]=s(r.args->text());
+        if(!s(r.wd->text()).isEmpty()) sc["working_dir"]=s(r.wd->text());
+        if(!s(r.icon->text()).isEmpty()) sc["icon"]=s(r.icon->text());
+        if(!s(r.smFolder->text()).isEmpty()) sc["start_menu_folder"]=s(r.smFolder->text());
+        if(r.admin->isChecked()) sc["run_as_admin"]=true; scs.append(sc); }
+    o["shortcuts"]=scs;
+
+    QJsonObject regs;
+    for(const auto& r:m_regRows){ if(!r.key) continue; QString k=s(r.key->text()), v=s(r.value->text()); if(!k.isEmpty()&&!v.isEmpty()) regs[k]=QJsonObject{{"",v}}; }
+    o["extra_registry"]=regs;
+
+    QJsonObject unst;
+    unst["uninstall_string"]=s(m_uninstString->text()); unst["quiet_uninstall_string"]=s(m_quietUninst->text());
+    unst["display_icon"]=s(m_uninstDispIcon->text()); unst["estimated_size"]=m_estSize->value();
+    unst["no_modify"]=m_noModify->isChecked(); unst["no_repair"]=m_noRepair->isChecked();
+    unst["help_link"]=s(m_helpLink->text()); o["uninstall"]=unst;
+
+    QJsonObject env;
+    if(!s(m_userPath->text()).isEmpty()){ QJsonObject u; u["PATH"]=s(m_userPath->text()); env["user"]=u; }
+    if(!s(m_sysPath->text()).isEmpty()){ QJsonObject u; u["PATH"]=s(m_sysPath->text()); env["system"]=u; }
+    if(!env.isEmpty()) o["environment"]=env;
+
+    QJsonArray fas;
+    for(const auto& r:m_assocRows){ if(!r.ext) continue;
+        QJsonObject fa; fa["extension"]=s(r.ext->text()); fa["description"]=s(r.desc->text()); fa["open_command"]=s(r.cmd->text());
+        if(!s(r.icon->text()).isEmpty()) fa["icon"]=s(r.icon->text());
+        if(!s(r.progId->text()).isEmpty()) fa["prog_id"]=s(r.progId->text()); fas.append(fa); }
+    o["file_associations"]=fas;
+
+    QJsonObject fa;
+    fa["run_program"]=m_runProg->isChecked(); fa["run_arguments"]=s(m_runArgs->text());
+    fa["open_readme"]=s(m_openReadme->text()); fa["restart_required"]=m_restart->isChecked();
+    o["finish_actions"]=fa;
+
+    QJsonObject adv;
+    adv["create_uninstaller"]=m_createUninst->isChecked(); adv["enable_logging"]=m_enableLog->isChecked();
+    adv["silent_install"]=m_silentInst->isChecked(); adv["minimum_os_version"]=s(m_minOs->text());
+    adv["64_bit_only"]=m_64bitOnly->isChecked();
+    if(!s(m_preservePats->text()).isEmpty()){ QJsonArray pa; for(auto& p:s(m_preservePats->text()).split(',')){ QString t=p.trimmed(); if(!t.isEmpty()) pa.append(t); } adv["update_preserve_patterns"]=pa; }
+    o["advanced"]=adv;
+
+    return o;
+}
+
+void Configurator::applyFormData(const QJsonObject& o)
+{
+    auto s = [](const QJsonValue& v){ return v.toString(); };
+    auto b = [](const QJsonValue& v, bool d){ return v.isBool() ? v.toBool() : d; };
+
+    QJsonObject inst = o["installer"].toObject();
+    m_name->setText(s(inst["name"])); m_shortName->setText(s(inst["short_name"]));
+    m_version->setText(s(inst["version"])); m_publisher->setText(s(inst["publisher"]));
+    m_copyright->setText(s(inst["copyright"])); m_website->setText(s(inst["website"]));
+    m_email->setText(s(inst["support_email"]));
+    int ri = m_rootCombo->findData(s(inst["default_install_root"])); if(ri>=0) m_rootCombo->setCurrentIndex(ri);
+    m_folder->setText(s(inst["default_install_folder"])); m_exe->setText(s(inst["main_executable"]));
+    m_license->setText(s(inst["license_file"]));
+    m_reqAdmin->setChecked(b(inst["requires_admin"],false)); m_allowPath->setChecked(b(inst["allow_change_path"],true));
+    m_icon->setText(s(inst["icon"])); m_setupIcon->setText(s(inst["setup_icon"]));
+    m_uninstIcon->setText(s(inst["uninstall_icon"])); m_banner->setText(s(inst["banner_image"]));
+    m_bgColor->setText(s(inst["background_color"]).isEmpty()?QStringLiteral("#FFFFFF"):s(inst["background_color"]));
+    m_welcomeTitle->setText(s(inst["welcome_title"])); m_welcomeText->setText(s(inst["welcome_text"]));
+    m_finishTitle->setText(s(inst["finish_title"])); m_finishMsg->setText(s(o["finish_message"]));
+
+    QJsonObject fs = o["files_strategy"].toObject();
+    if(!fs.isEmpty()){
+        int mi=m_fileMode->findText(s(fs["mode"])); if(mi>=0) m_fileMode->setCurrentIndex(mi);
+        QString ov=s(fs["overwrite"]); if(ov=="always") m_overwrite->setCurrentIndex(1); else if(ov=="never") m_overwrite->setCurrentIndex(2); else m_overwrite->setCurrentIndex(0);
+        QJsonArray ex=fs["exclude"].toArray(); QStringList el; for(const auto& v:ex) el<<v.toString(); m_exclude->setText(el.join(QStringLiteral(", ")));
+    }
+    m_filesDir->setText(s(o["_files_source"]));
+
+    // shortcuts — reload from saved data (clear existing, recreate)
+    for(int i=m_scRows.size()-1; i>=0; i--){ m_scRows[i]={}; }
+    // Clear layout
+    while(m_scLayout->count()){ auto* it=m_scLayout->takeAt(0); if(it->widget()){ delete it->widget(); } else if(it->layout()){ while(it->layout()->count()){ auto* c=it->layout()->takeAt(0); delete c->widget(); delete c; } delete it->layout(); } delete it; }
+    m_scRows.clear();
+
+    QJsonArray scs=o["shortcuts"].toArray();
+    for(const auto& v:scs){
+        onAddShortcut();
+        auto& r=m_scRows.last(); QJsonObject sc=v.toObject();
+        r.target->setText(s(sc["target"]));
+        int li=r.location->findText(s(sc["location"])); if(li>=0) r.location->setCurrentIndex(li);
+        r.name->setText(s(sc["name"])); r.desc->setText(s(sc["description"]));
+        r.args->setText(s(sc["arguments"])); r.wd->setText(s(sc["working_dir"]));
+        r.icon->setText(s(sc["icon"])); r.smFolder->setText(s(sc["start_menu_folder"]));
+        r.admin->setChecked(b(sc["run_as_admin"],false));
+    }
+    if(scs.isEmpty()){ onAddShortcut(); onAddShortcut(); }
+
+    QJsonObject unst=o["uninstall"].toObject();
+    m_uninstString->setText(s(unst["uninstall_string"])); m_quietUninst->setText(s(unst["quiet_uninstall_string"]));
+    m_uninstDispIcon->setText(s(unst["display_icon"])); m_estSize->setValue(unst["estimated_size"].toInt());
+    m_noModify->setChecked(b(unst["no_modify"],true)); m_noRepair->setChecked(b(unst["no_repair"],true));
+    m_helpLink->setText(s(unst["help_link"]));
+
+    QJsonObject env=o["environment"].toObject();
+    m_userPath->setText(s(env["user"].toObject()["PATH"])); m_sysPath->setText(s(env["system"].toObject()["PATH"]));
+
+    QJsonObject fa=o["finish_actions"].toObject();
+    m_runProg->setChecked(b(fa["run_program"],true)); m_runArgs->setText(s(fa["run_arguments"]));
+    m_openReadme->setText(s(fa["open_readme"])); m_restart->setChecked(b(fa["restart_required"],false));
+
+    QJsonObject adv=o["advanced"].toObject();
+    m_createUninst->setChecked(b(adv["create_uninstaller"],true));
+    m_enableLog->setChecked(b(adv["enable_logging"],false));
+    m_silentInst->setChecked(b(adv["silent_install"],false));
+    m_minOs->setText(s(adv["minimum_os_version"])); m_64bitOnly->setChecked(b(adv["64_bit_only"],false));
+    QJsonArray pp=adv["update_preserve_patterns"].toArray(); QStringList ppl; for(const auto& v:pp) ppl<<v.toString();
+    m_preservePats->setText(ppl.join(QStringLiteral(", ")));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  Generate
