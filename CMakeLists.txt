@@ -30,6 +30,18 @@ if(MINGW)
 endif()
 set_target_properties(Configurator PROPERTIES WIN32_EXECUTABLE TRUE)
 
+# ── Deploy target (copy DLLs for standalone distribution) ─────────────────────
+find_program(WINDEPLOYQT windeployqt HINTS "${Qt6_DIR}/../../../bin")
+if(WINDEPLOYQT)
+    add_custom_target(deploy-configurator
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/deploy"
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Configurator> "${CMAKE_BINARY_DIR}/deploy/"
+        COMMAND ${WINDEPLOYQT} --no-translations "${CMAKE_BINARY_DIR}/deploy/Configurator.exe"
+        COMMENT "Deploying Configurator..."
+        DEPENDS Configurator
+    )
+endif()
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Target 2: Setup (installer, built only when PACKAGE_DIR is provided)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -83,6 +95,15 @@ if(DEFINED PACKAGE_DIR)
         target_link_options(Setup PRIVATE -static-libgcc -static-libstdc++)
     endif()
     set_target_properties(Setup PROPERTIES WIN32_EXECUTABLE TRUE)
+
+    if(WINDEPLOYQT)
+        add_custom_target(deploy-setup
+            COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Setup> "${CMAKE_BINARY_DIR}/deploy/"
+            COMMAND ${WINDEPLOYQT} --no-translations "${CMAKE_BINARY_DIR}/deploy/Setup.exe"
+            COMMENT "Deploying Setup..."
+            DEPENDS Setup
+        )
+    endif()
 
 endif()
 
