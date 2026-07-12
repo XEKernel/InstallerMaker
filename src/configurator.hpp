@@ -127,6 +127,7 @@ private:
     QCheckBox* m_silentInst   = nullptr;
     QLineEdit* m_minOs        = nullptr;
     QCheckBox* m_64bitOnly    = nullptr;
+    QLineEdit* m_preservePats = nullptr;
 
     // ── Tab 12: Output + action ──────────────────────────────────────────
     QLineEdit* m_output       = nullptr;

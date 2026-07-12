@@ -313,6 +313,134 @@ QString InstallerEngine::advancedMinOsVersion() const
 bool    InstallerEngine::advanced64BitOnly() const
 { return A_OBJ.value(QStringLiteral("64_bit_only")).toBool(false); }
 
+QStringList InstallerEngine::advancedUpdatePreservePatterns() const
+{
+    QStringList list;
+    const QJsonArray arr = A_OBJ.value(QStringLiteral("update_preserve_patterns")).toArray();
+    for (const auto& v : arr) list.append(v.toString());
+    // Default patterns if none specified
+    if (list.isEmpty()) list << QStringLiteral("*.ini") << QStringLiteral("*.cfg")
+                              << QStringLiteral("*.conf") << QStringLiteral("config/*")
+                              << QStringLiteral("data/*")  << QStringLiteral("*.db");
+    return list;
+}
+
+// ── Installation detection ──────────────────────────────────────────────────
+
+InstallerEngine::InstalledInfo
+InstallerEngine::getInstalledInfo(const QString& appName)
+{
+    InstalledInfo info;
+    QSettings uk(
+        QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\"
+                       "CurrentVersion\\Uninstall\\%1").arg(appName),
+        QSettings::NativeFormat);
+    QString path = uk.value(QStringLiteral("InstallLocation")).toString();
+    if (path.isEmpty()) {
+        // Try with short_name variant
+        QSettings uk2(
+            QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\"
+                           "CurrentVersion\\Uninstall\\%1")
+                .arg(appName.toLower().replace(QRegularExpression(QStringLiteral("[^a-z0-9_]")),
+                                               QStringLiteral("_"))),
+            QSettings::NativeFormat);
+        path = uk2.value(QStringLiteral("InstallLocation")).toString();
+    }
+    if (!path.isEmpty() && QDir(path).exists()) {
+        info.installed   = true;
+        info.installPath = path;
+        info.version     = uk.value(QStringLiteral("DisplayVersion")).toString();
+    }
+    return info;
+}
+
+// ── Silent update (auto-update) ─────────────────────────────────────────────
+
+void InstallerEngine::silentUpdate(const QString& installDir)
+{
+    int fileCount = 0;
+    {
+        QDirIterator it(QStringLiteral(":/package/files/"),
+                        QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) { it.next(); ++fileCount; }
+    }
+
+    const QStringList preservePatterns = advancedUpdatePreservePatterns();
+    const int totalSteps = fileCount + 3;  // backup + copy + cleanup
+    int step = 0;
+
+    emit statusChanged(tr("正在准备更新..."));
+    emit progressChanged(0);
+
+    // ── 1. Backup preserved files ─────────────────────────────────────────
+    QMap<QString, QByteArray> preservedData;
+    if (QDir(installDir).exists()) {
+        for (const QString& pat : preservePatterns) {
+            QRegularExpression re(QRegularExpression::wildcardToRegularExpression(pat),
+                                  QRegularExpression::CaseInsensitiveOption);
+            QDirIterator it(installDir, QDir::Files, QDirIterator::Subdirectories);
+            while (it.hasNext()) {
+                it.next();
+                QString rel = QDir(installDir).relativeFilePath(it.filePath());
+                if (re.match(rel).hasMatch()) {
+                    QFile f(it.filePath());
+                    if (f.open(QIODevice::ReadOnly))
+                        preservedData[rel] = f.readAll();
+                }
+            }
+        }
+    }
+    step++;
+    emit progressChanged(step * 100 / totalSteps);
+    emit statusChanged(tr("正在备份配置文件..."));
+
+    // ── 2. Remove old files (keep directory structure for config though) ──
+    {
+        QDirIterator it(installDir, QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) { it.next(); QFile::remove(it.filePath()); }
+    }
+
+    // ── 3. Copy new files ─────────────────────────────────────────────────
+    {
+        QDir baseDir(QStringLiteral(":/package/files/"));
+        QDirIterator it(QStringLiteral(":/package/files/"),
+                        QDir::Files, QDirIterator::Subdirectories);
+        while (it.hasNext()) {
+            it.next();
+            const QString rel    = baseDir.relativeFilePath(it.filePath());
+            const QString target = QDir(installDir).absoluteFilePath(rel);
+            QDir().mkpath(QFileInfo(target).absolutePath());
+            if (QFile::exists(target)) QFile::remove(target);
+            if (!QFile::copy(it.filePath(), target)) {
+                emit finished(false, tr("文件复制失败:\n%1").arg(rel));
+                return;
+            }
+            step++;
+            emit progressChanged(step * 100 / totalSteps);
+            emit statusChanged(tr("正在更新: %1").arg(rel));
+        }
+    }
+
+    // ── 4. Restore preserved files ────────────────────────────────────────
+    for (auto it = preservedData.begin(); it != preservedData.end(); ++it) {
+        QString target = QDir(installDir).absoluteFilePath(it.key());
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        QFile f(target);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(it.value());
+            f.close();
+        }
+    }
+
+    // ── 5. Update registry version ────────────────────────────────────────
+    writeRegistry(installDir);
+    writeUninstallInfo(installDir);
+
+    emit progressChanged(100);
+    emit statusChanged(tr("更新完成！"));
+    emit finished(true, {});
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  INSTALL
 // ═══════════════════════════════════════════════════════════════════════════════

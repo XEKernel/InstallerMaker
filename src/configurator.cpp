@@ -294,6 +294,7 @@ QWidget* Configurator::buildTabAdvanced()
     m_silentInst   = new QCheckBox(tr("支持静默安装 /S")); f->addRow({}, m_silentInst);
     m_minOs        = new QLineEdit; m_minOs->setPlaceholderText(tr("如 10.0.17763")); f->addRow(tr("最低系统版本:"), m_minOs);
     m_64bitOnly    = new QCheckBox(tr("仅64位系统")); f->addRow({}, m_64bitOnly);
+    m_preservePats = new QLineEdit; m_preservePats->setPlaceholderText(tr("逗号分隔，如 *.ini, config/*, data/*")); f->addRow(tr("更新时保留文件:"), m_preservePats);
     return w;
 }
 
@@ -434,6 +435,13 @@ bool Configurator::generatePackageJson(const QString& packageDir)
     if(m_silentInst->isChecked()) adv["silent_install"]=true;
     if(!s(m_minOs->text()).isEmpty()) adv["minimum_os_version"]=s(m_minOs->text());
     if(m_64bitOnly->isChecked()) adv["64_bit_only"]=true;
+    if(!s(m_preservePats->text()).isEmpty()){
+        QJsonArray pa;
+        for(const auto& p:s(m_preservePats->text()).split(',')){
+            QString t=p.trimmed(); if(!t.isEmpty()) pa.append(t);
+        }
+        adv["update_preserve_patterns"]=pa;
+    }
     pkg["advanced"]=adv;
 
     // Write

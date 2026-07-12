@@ -64,9 +64,23 @@ public:
     bool    advancedSilentInstall()     const;
     QString advancedMinOsVersion()      const;
     bool    advanced64BitOnly()         const;
+    QStringList advancedUpdatePreservePatterns() const;
+
+    // ── Installation detection ────────────────────────────────────────────
+    struct InstalledInfo {
+        bool    installed = false;
+        QString version;
+        QString installPath;
+    };
+    static InstalledInfo getInstalledInfo(const QString& appName);
 
 public slots:
     void install(const QString& installDir);
+
+    /// Auto-update: remove old files except preserved config, install new.
+    /// @param installDir  Existing installation directory.
+    void silentUpdate(const QString& installDir);
+
     void uninstall(const QString& installDir);
 
 signals:
