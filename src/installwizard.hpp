@@ -12,22 +12,19 @@ class QProgressBar;
 class QPushButton;
 class QStackedWidget;
 class QVBoxLayout;
+class QHBoxLayout;
 
-/// Single-window installer / uninstaller dialog.
+/// Installer / uninstaller dialog.
 ///
-/// Layout:
-///   ┌──────────┬──────────────────────────┐
-///   │  step    │   content area           │
-///   │  list    │   (QStackedWidget)       │
-///   │  (left)  │                          │
-///   ├──────────┴──────────────────────────┤
-///   │       [Back]  [Next/Install]  [Cancel] │
-///   └─────────────────────────────────────┘
+/// Two UI styles:
+///   - wizard: left step panel + right stacked pages
+///   - oneclick: single page with all options, inline progress
 class InstallWizard : public QDialog {
     Q_OBJECT
 
 public:
     enum Mode { Install, Uninstall };
+    enum UiStyle { Wizard, OneClick };
 
     InstallWizard(Mode mode,
                   const QJsonObject& package,
@@ -42,57 +39,62 @@ private slots:
     void onProgressChanged(int percent);
     void onStatusChanged(const QString& text);
     void onFinished(bool success, const QString& error);
+    void onOneClickInstall();
+    void onShowLicense();
 
 private:
-    void setupUi();
+    // ── Wizard mode ──────────────────────────────────────────────────────
+    void setupWizardUi();
     void navigateTo(int step);
     void refreshButtons();
     void refreshStepIndicator();
-    void startInstallation(const QString& path);
-    void startUninstallation();
-
-    // ── Page builders ────────────────────────────────────────────────────
     QWidget* buildWelcomePage();
     QWidget* buildLicensePage();
     QWidget* buildPathPage();
     QWidget* buildProgressPage();
     QWidget* buildFinishPage();
+
+    // ── One-click mode ───────────────────────────────────────────────────
+    void setupOneClickUi();
+
+    // ── Uninstall pages (wizard only) ────────────────────────────────────
     QWidget* buildUninstallConfirmPage();
     QWidget* buildUninstallProgressPage();
     QWidget* buildUninstallFinishPage();
 
-    // ── Data ─────────────────────────────────────────────────────────────
+    // ── Shared ───────────────────────────────────────────────────────────
+    void startInstallation(const QString& path);
+
     Mode          m_mode;
+    UiStyle       m_style;
     QJsonObject   m_package;
     QString       m_uninstallDir;
     int           m_currentStep = 0;
 
-    // step names (ordered)
     QStringList   m_installSteps;
     QStringList   m_uninstallSteps;
 
-    // ── Left panel ───────────────────────────────────────────────────────
+    // ── Wizard widgets ───────────────────────────────────────────────────
     QVBoxLayout*  m_stepLayout   = nullptr;
-    // per-step labels: [iconLabel, textLabel]
-
-    // ── Right panel ──────────────────────────────────────────────────────
     QStackedWidget* m_stack      = nullptr;
-
-    // ── Bottom buttons ───────────────────────────────────────────────────
     QPushButton*  m_backBtn      = nullptr;
     QPushButton*  m_nextBtn      = nullptr;
     QPushButton*  m_cancelBtn    = nullptr;
-
-    // ── Page 1 (license) widgets ─────────────────────────────────────────
-    QCheckBox*    m_licenseBox   = nullptr;
-
-    // ── Page 2 (install path) widgets ────────────────────────────────────
     QLineEdit*    m_pathEdit     = nullptr;
-
-    // ── Page 3 / uninstall-1 (progress) widgets ──────────────────────────
+    QCheckBox*    m_licenseBox   = nullptr;
     QProgressBar* m_progressBar  = nullptr;
     QLabel*       m_statusLabel  = nullptr;
-
-    // ── Page 4 (finish) widgets ──────────────────────────────────────────
     QCheckBox*    m_runCheckBox  = nullptr;
+
+    // ── One-click widgets ────────────────────────────────────────────────
+    QWidget*      m_oneClickPage = nullptr;
+    QLineEdit*    m_ocPathEdit   = nullptr;
+    QCheckBox*    m_ocLicenseBox = nullptr;
+    QPushButton*  m_ocLicenseBtn = nullptr;
+    QCheckBox*    m_ocDesktopBox = nullptr;
+    QCheckBox*    m_ocStartMenuBox = nullptr;
+    QCheckBox*    m_ocAutoStartBox = nullptr;
+    QProgressBar* m_ocProgressBar = nullptr;
+    QLabel*       m_ocStatusLabel = nullptr;
+    QPushButton*  m_ocInstallBtn = nullptr;
 };

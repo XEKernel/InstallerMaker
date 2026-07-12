@@ -188,6 +188,10 @@ QWidget* Configurator::buildTabAppearance()
     m_uninstIcon = new QLineEdit; f->addRow(tr("卸载图标:"), m_uninstIcon); browse(m_uninstIcon, tr("选择图标"), tr("图标(*.ico)"));
     m_banner     = new QLineEdit; f->addRow(tr("横幅图片:"), m_banner); browse(m_banner, tr("选择图片"), tr("图片(*.png *.bmp)"));
     m_bgColor    = new QLineEdit(QStringLiteral("#FFFFFF")); f->addRow(tr("背景色:"), m_bgColor);
+    m_uiStyle    = new QComboBox;
+    m_uiStyle->addItem(tr("向导样式（分步）"), QStringLiteral("wizard"));
+    m_uiStyle->addItem(tr("一键安装（单页）"), QStringLiteral("oneclick"));
+    f->addRow(tr("界面样式:"), m_uiStyle);
     m_welcomeTitle = new QLineEdit; m_welcomeTitle->setPlaceholderText(tr("默认: 欢迎使用 {name} 安装向导"));
     f->addRow(tr("欢迎标题:"), m_welcomeTitle);
     m_welcomeText  = new QLineEdit; m_welcomeText->setPlaceholderText(tr("默认介绍文本"));
@@ -429,6 +433,7 @@ QJsonObject Configurator::collectFormData() const
     inst["icon"]=s(m_icon->text()); inst["setup_icon"]=s(m_setupIcon->text());
     inst["uninstall_icon"]=s(m_uninstIcon->text()); inst["banner_image"]=s(m_banner->text());
     inst["background_color"]=s(m_bgColor->text());
+    inst["ui_style"]=m_uiStyle->currentData().toString();
     inst["welcome_title"]=s(m_welcomeTitle->text()); inst["welcome_text"]=s(m_welcomeText->text());
     inst["finish_title"]=s(m_finishTitle->text());
     o["installer"]=inst;
@@ -509,6 +514,7 @@ void Configurator::applyFormData(const QJsonObject& o)
     m_icon->setText(s(inst["icon"])); m_setupIcon->setText(s(inst["setup_icon"]));
     m_uninstIcon->setText(s(inst["uninstall_icon"])); m_banner->setText(s(inst["banner_image"]));
     m_bgColor->setText(s(inst["background_color"]).isEmpty()?QStringLiteral("#FFFFFF"):s(inst["background_color"]));
+    int si=m_uiStyle->findData(s(inst["ui_style"])); if(si>=0) m_uiStyle->setCurrentIndex(si);
     m_welcomeTitle->setText(s(inst["welcome_title"])); m_welcomeText->setText(s(inst["welcome_text"]));
     m_finishTitle->setText(s(inst["finish_title"])); m_finishMsg->setText(s(o["finish_message"]));
 
@@ -591,6 +597,7 @@ bool Configurator::generatePackageJson(const QString& packageDir)
     if(!s(m_uninstIcon->text()).isEmpty()){ QFileInfo fi(s(m_uninstIcon->text())); inst["uninstall_icon"]=fi.fileName(); }
     if(!s(m_banner->text()).isEmpty()){ QFileInfo fi(s(m_banner->text())); inst["banner_image"]=fi.fileName(); }
     if(!s(m_bgColor->text()).isEmpty()) inst["background_color"]=s(m_bgColor->text());
+    inst["ui_style"]=m_uiStyle->currentData().toString();
     if(!s(m_welcomeTitle->text()).isEmpty()) inst["welcome_title"]=s(m_welcomeTitle->text());
     if(!s(m_welcomeText->text()).isEmpty()) inst["welcome_text"]=s(m_welcomeText->text());
     if(!s(m_finishTitle->text()).isEmpty()) inst["finish_title"]=s(m_finishTitle->text());

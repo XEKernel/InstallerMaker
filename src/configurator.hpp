@@ -91,6 +91,7 @@ private:
     QLineEdit* m_uninstIcon = nullptr;
     QLineEdit* m_banner     = nullptr;
     QLineEdit* m_bgColor    = nullptr;
+    QComboBox* m_uiStyle    = nullptr;
     QLineEdit* m_welcomeTitle  = nullptr;
     QLineEdit* m_welcomeText   = nullptr;
     QLineEdit* m_finishTitle   = nullptr;
