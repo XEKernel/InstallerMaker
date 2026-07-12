@@ -21,405 +21,330 @@
 #include <QVBoxLayout>
 
 // ═══════════════════════════════════════════════════════════════════════════════
-InstallWizard::InstallWizard(Mode mode, const QJsonObject& package,
-                             const QString& uninstallDir, QWidget* parent)
-    : QDialog(parent), m_mode(mode), m_package(package), m_uninstallDir(uninstallDir)
+//  Constructor
+// ═══════════════════════════════════════════════════════════════════════════════
+
+InstallWizard::InstallWizard(Mode mode, const QJsonObject& pkg,
+                             const QString& uninstDir, QWidget* parent)
+    : QDialog(parent), m_mode(mode), m_pkg(pkg), m_uninstDir(uninstDir)
 {
-    m_installSteps   = { tr("欢迎"), tr("许可协议"), tr("安装位置"), tr("安装进度"), tr("完成") };
-    m_uninstallSteps = { tr("确认卸载"), tr("卸载进度"), tr("完成") };
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    m_steps = (m_mode==Install) ? QStringList{tr("欢迎"),tr("许可协议"),tr("安装位置"),tr("安装进度"),tr("完成")}
+                                : QStringList{tr("确认卸载"),tr("卸载进度"),tr("完成")};
 
-    QString uiStyle = package.value(QStringLiteral("installer")).toObject()
-                          .value(QStringLiteral("ui_style")).toString(QStringLiteral("wizard"));
-    m_style = (uiStyle == QStringLiteral("oneclick") && mode == Install) ? OneClick : Wizard;
+    QString ui = inst[QStringLiteral("ui_style")].toString(QStringLiteral("wizard"));
+    m_style = (ui==QStringLiteral("oneclick") && m_mode==Install) ? OneClick : WizardStyle;
 
-    if (m_style == OneClick) { setupOneClickUi(); return; }
-    setupWizardUi();
+    const QString name = inst[QStringLiteral("name")].toString();
+    setWindowTitle((m_mode==Install) ? tr("%1 安装程序").arg(name) : tr("%1 卸载程序").arg(name));
+
+    if (m_style == OneClick) setupOneClick(); else setupWizard();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  One-click UI — horizontal layout
+//  One-Click
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void InstallWizard::setupOneClickUi()
+void InstallWizard::setupOneClick()
 {
-    const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString name    = inst.value(QStringLiteral("name")).toString();
-    const QString ver     = inst.value(QStringLiteral("version")).toString();
-    const QString pub     = inst.value(QStringLiteral("publisher")).toString();
-    const QString defRoot = InstallerEngine::resolvePath(inst.value(QStringLiteral("default_install_root")).toString());
-    const QString defFolder = inst.value(QStringLiteral("default_install_folder")).toString();
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    const QString name   = inst[QStringLiteral("name")].toString();
+    const QString ver    = inst[QStringLiteral("version")].toString();
+    const QString pub    = inst[QStringLiteral("publisher")].toString();
+    const QString defPath= QDir::toNativeSeparators(
+        QDir(InstallerEngine::resolvePath(inst[QStringLiteral("default_install_root")].toString()))
+            .absoluteFilePath(inst[QStringLiteral("default_install_folder")].toString()));
 
-    setWindowTitle(tr("%1 安装程序").arg(name));
     setMinimumSize(640, 400); resize(700, 440);
 
-    // ── Main horizontal layout ────────────────────────────────────────────
-    auto* h = new QHBoxLayout(this);
-    h->setContentsMargins(24, 20, 24, 16); h->setSpacing(24);
+    auto* h = new QHBoxLayout(this); h->setContentsMargins(24,20,24,16); h->setSpacing(24);
 
-    // Left: info + options
-    auto* left = new QVBoxLayout(); left->setSpacing(10);
+    // ── Left ──────────────────────────────────────────────────────────────
+    auto* left = new QVBoxLayout; left->setSpacing(10);
 
-    auto* title = new QLabel(tr("<h3>%1 %2</h3>").arg(name, ver), this);
-    left->addWidget(title);
-    auto* pubLabel = new QLabel(pub, this);
-    pubLabel->setStyleSheet(QStringLiteral("color:#888"));
-    left->addWidget(pubLabel);
+    auto* title = new QLabel(tr("<h3>%1 %2</h3>").arg(name,ver), this);
+    auto* sub   = new QLabel(pub, this); sub->setStyleSheet(QStringLiteral("color:#888;"));
+    left->addWidget(title); left->addWidget(sub);
 
-    auto* sep = new QFrame(this); sep->setFrameShape(QFrame::HLine); left->addWidget(sep);
+    auto* s1 = new QFrame(this); s1->setFrameShape(QFrame::HLine); left->addWidget(s1);
 
-    // Install path
-    auto* pathRow = new QHBoxLayout();
-    m_ocPathEdit = new QLineEdit(QDir::toNativeSeparators(QDir(defRoot).absoluteFilePath(defFolder)), this);
-    pathRow->addWidget(m_ocPathEdit, 1);
+    auto* pathRow = new QHBoxLayout;
+    m_ocPath = new QLineEdit(defPath, this);
+    pathRow->addWidget(m_ocPath, 1);
     auto* browse = new QPushButton(tr("浏览..."), this);
-    connect(browse, &QPushButton::clicked, this, [this]() {
-        QString d = QFileDialog::getExistingDirectory(this, tr("选择安装目录"), m_ocPathEdit->text());
-        if (!d.isEmpty()) m_ocPathEdit->setText(QDir::toNativeSeparators(d));
+    connect(browse, &QPushButton::clicked, this, [this](){
+        QString d = QFileDialog::getExistingDirectory(this, tr("选择安装目录"), m_ocPath->text());
+        if (!d.isEmpty()) m_ocPath->setText(QDir::toNativeSeparators(d));
     });
     pathRow->addWidget(browse);
     left->addWidget(new QLabel(tr("安装目录:"), this));
     left->addLayout(pathRow);
 
-    // Options group
     auto* optGrp = new QGroupBox(tr("安装选项"), this);
     auto* optLay = new QVBoxLayout(optGrp);
-    m_ocDesktopBox   = new QCheckBox(tr("创建桌面快捷方式"), this); m_ocDesktopBox->setChecked(true);
-    m_ocStartMenuBox = new QCheckBox(tr("创建开始菜单快捷方式"), this); m_ocStartMenuBox->setChecked(true);
-    m_ocAutoStartBox = new QCheckBox(tr("开机自启"), this);
-    optLay->addWidget(m_ocDesktopBox);
-    optLay->addWidget(m_ocStartMenuBox);
-    optLay->addWidget(m_ocAutoStartBox);
+    auto* cb1 = new QCheckBox(tr("创建桌面快捷方式"), this); cb1->setChecked(true);
+    auto* cb2 = new QCheckBox(tr("创建开始菜单快捷方式"), this); cb2->setChecked(true);
+    auto* cb3 = new QCheckBox(tr("开机自启"), this);
+    optLay->addWidget(cb1); optLay->addWidget(cb2); optLay->addWidget(cb3);
     left->addWidget(optGrp);
 
-    // License row
-    auto* licRow = new QHBoxLayout();
-    m_ocLicenseBox = new QCheckBox(tr("我已阅读并同意"), this);
-    licRow->addWidget(m_ocLicenseBox);
-    m_ocLicenseBtn = new QPushButton(tr("许可协议"), this);
-    m_ocLicenseBtn->setFlat(true);
-    m_ocLicenseBtn->setStyleSheet(QStringLiteral("color:#0066cc; text-decoration:underline; border:none;"));
-    connect(m_ocLicenseBtn, &QPushButton::clicked, this, &InstallWizard::onShowLicense);
-    licRow->addWidget(m_ocLicenseBtn); licRow->addStretch();
+    auto* licRow = new QHBoxLayout;
+    m_ocLicense = new QCheckBox(tr("我已阅读并同意"), this);
+    licRow->addWidget(m_ocLicense);
+    auto* licBtn = new QPushButton(tr("许可协议"), this);
+    licBtn->setFlat(true); licBtn->setStyleSheet(QStringLiteral("color:#06c;text-decoration:underline;border:none;"));
+    connect(licBtn, &QPushButton::clicked, this, &InstallWizard::onShowLicense);
+    licRow->addWidget(licBtn); licRow->addStretch();
     left->addLayout(licRow);
     left->addStretch();
 
-    // Right: install button + progress
-    auto* right = new QVBoxLayout(); right->setSpacing(12);
+    // ── Right ─────────────────────────────────────────────────────────────
+    auto* right = new QVBoxLayout; right->setSpacing(12); right->addStretch();
+
+    m_ocBtn = new QPushButton(tr("立即安装"), this);
+    m_ocBtn->setMinimumSize(160, 120);
+    m_ocBtn->setStyleSheet(QStringLiteral("QPushButton{font-size:16pt;font-weight:bold;padding:20px 40px;border-radius:8px}"));
+    m_ocBtn->setEnabled(false);
+    connect(m_ocBtn, &QPushButton::clicked, this, &InstallWizard::onOneClickGo);
+    connect(m_ocLicense, &QCheckBox::toggled, m_ocBtn, &QPushButton::setEnabled);
+
+    auto* ctr = new QHBoxLayout; ctr->addStretch(); ctr->addWidget(m_ocBtn); ctr->addStretch();
+    right->addLayout(ctr);
+
+    m_ocBar = new QProgressBar(this); m_ocBar->setRange(0,100); m_ocBar->setValue(0);
+    m_ocBar->setVisible(false); m_ocBar->setMinimumWidth(200);
+    right->addWidget(m_ocBar);
+    m_ocStatus = new QLabel(this); m_ocStatus->setWordWrap(true); m_ocStatus->setVisible(false);
+    right->addWidget(m_ocStatus);
     right->addStretch();
 
-    // Big install button
-    m_ocInstallBtn = new QPushButton(tr("立即安装"), this);
-    m_ocInstallBtn->setMinimumSize(160, 120);
-    m_ocInstallBtn->setStyleSheet(QStringLiteral(
-        "QPushButton{font-size:16pt;font-weight:bold;padding:20px 40px;border-radius:8px;}"));
-    m_ocInstallBtn->setEnabled(false);
-    connect(m_ocInstallBtn, &QPushButton::clicked, this, &InstallWizard::onOneClickInstall);
-    connect(m_ocLicenseBox, &QCheckBox::toggled, m_ocInstallBtn, &QPushButton::setEnabled);
-
-    auto* btnCenter = new QHBoxLayout(); btnCenter->addStretch();
-    btnCenter->addWidget(m_ocInstallBtn); btnCenter->addStretch();
-    right->addLayout(btnCenter);
-
-    // Progress
-    m_ocProgressBar = new QProgressBar(this); m_ocProgressBar->setRange(0,100);
-    m_ocProgressBar->setValue(0); m_ocProgressBar->setVisible(false);
-    m_ocProgressBar->setMinimumWidth(200);
-    right->addWidget(m_ocProgressBar);
-
-    m_ocStatusLabel = new QLabel(this); m_ocStatusLabel->setWordWrap(true);
-    m_ocStatusLabel->setVisible(false);
-    right->addWidget(m_ocStatusLabel);
-
-    right->addStretch();
-
-    h->addLayout(left, 3);
-    h->addLayout(right, 2);
+    h->addLayout(left, 3); h->addLayout(right, 2);
 }
 
 void InstallWizard::onShowLicense()
 {
     auto* dlg = new QDialog(this);
-    dlg->setWindowTitle(tr("许可协议")); dlg->resize(500, 400);
+    dlg->setWindowTitle(tr("许可协议")); dlg->resize(500,400);
     auto* lay = new QVBoxLayout(dlg);
     auto* edit = new QTextEdit(dlg); edit->setReadOnly(true);
-    QString lf = m_package.value(QStringLiteral("installer")).toObject()
-                     .value(QStringLiteral("license_file")).toString();
+    QString lf = m_pkg[QStringLiteral("installer")].toObject()[QStringLiteral("license_file")].toString();
     if (!lf.isEmpty()) {
         QFile f(QStringLiteral(":/package/files/%1").arg(lf));
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text))
-            edit->setPlainText(QString::fromUtf8(f.readAll()));
-    } else { edit->setPlainText(tr("(未提供许可协议)")); }
+        if (f.open(QIODevice::ReadOnly|QIODevice::Text)) edit->setPlainText(QString::fromUtf8(f.readAll()));
+    } else edit->setPlainText(tr("(未提供许可协议)"));
     lay->addWidget(edit);
-    auto* close = new QPushButton(tr("关闭"), dlg);
-    connect(close, &QPushButton::clicked, dlg, &QDialog::accept);
+    auto* close = new QPushButton(tr("关闭"), dlg); connect(close,&QPushButton::clicked,dlg,&QDialog::accept);
     lay->addWidget(close); dlg->exec(); dlg->deleteLater();
 }
 
-void InstallWizard::onOneClickInstall()
+void InstallWizard::onOneClickGo()
 {
-    m_ocPathEdit->setEnabled(false);      m_ocDesktopBox->setEnabled(false);
-    m_ocStartMenuBox->setEnabled(false);  m_ocAutoStartBox->setEnabled(false);
-    m_ocLicenseBox->setEnabled(false);    m_ocLicenseBtn->setEnabled(false);
-    m_ocInstallBtn->setVisible(false);
-    m_ocProgressBar->setVisible(true); m_ocStatusLabel->setVisible(true);
-    startInstallation(m_ocPathEdit->text());
+    m_ocPath->setEnabled(false); m_ocLicense->setEnabled(false); m_ocBtn->setVisible(false);
+    m_ocBar->setVisible(true); m_ocStatus->setVisible(true);
+    startInstall(m_ocPath->text());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  Wizard UI
+//  Wizard
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void InstallWizard::setupWizardUi()
+void InstallWizard::setupWizard()
 {
-    const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString appName = inst.value(QStringLiteral("name")).toString();
-    setWindowTitle((m_mode == Install) ? tr("%1 安装程序").arg(appName)
-                                       : tr("%1 卸载程序").arg(appName));
     setMinimumSize(680, 480); resize(740, 520);
 
-    auto* ml = new QHBoxLayout(this); ml->setContentsMargins(0,0,0,0); ml->setSpacing(0);
+    auto* h = new QHBoxLayout(this); h->setContentsMargins(0,0,0,0); h->setSpacing(0);
 
-    // ── Left step panel ───────────────────────────────────────────────────
-    auto* lp = new QFrame(this);
-    lp->setFixedWidth(170); lp->setFrameShape(QFrame::NoFrame);
-    {
-        auto pal = lp->palette();
-        pal.setColor(QPalette::Window, QColor(45, 45, 48));
-        lp->setPalette(pal); lp->setAutoFillBackground(true);
-    }
-    auto* ll = new QVBoxLayout(lp);
-    ll->setContentsMargins(16, 24, 16, 20); ll->setSpacing(6);
+    // ── Left panel ────────────────────────────────────────────────────────
+    auto* leftPanel = new QFrame(this);
+    leftPanel->setFixedWidth(170); leftPanel->setFrameShape(QFrame::NoFrame);
+    { auto p = leftPanel->palette(); p.setColor(QPalette::Window, QColor(42,42,46));
+      leftPanel->setPalette(p); leftPanel->setAutoFillBackground(true); }
+    auto* leftLay = new QVBoxLayout(leftPanel);
+    leftLay->setContentsMargins(16,24,16,20); leftLay->setSpacing(0);
 
-    auto* header = new QLabel(tr("安装步骤"), lp);
-    header->setStyleSheet(QStringLiteral("color:#aaa;font-size:11px;"));
-    ll->addWidget(header);
-
-    auto* sep = new QFrame(lp); sep->setFrameShape(QFrame::HLine);
-    sep->setStyleSheet(QStringLiteral("color:#555;"));
-    ll->addWidget(sep); ll->addSpacing(8);
+    auto* head = new QLabel(tr("安装步骤"), leftPanel);
+    head->setStyleSheet(QStringLiteral("color:#999;font-size:11px;margin-bottom:4px;"));
+    leftLay->addWidget(head);
+    auto* hl = new QFrame(leftPanel); hl->setFrameShape(QFrame::HLine);
+    hl->setStyleSheet(QStringLiteral("border-color:#444;"));
+    leftLay->addWidget(hl); leftLay->addSpacing(10);
 
     m_stepLayout = new QVBoxLayout; m_stepLayout->setSpacing(2);
-    ll->addLayout(m_stepLayout); ll->addStretch();
-    ml->addWidget(lp);
+    leftLay->addLayout(m_stepLayout);
+    leftLay->addStretch();
+    h->addWidget(leftPanel);
 
-    // ── Right content area ────────────────────────────────────────────────
-    auto* rp = new QFrame(this); rp->setFrameShape(QFrame::NoFrame);
-    auto* rl = new QVBoxLayout(rp);
-    rl->setContentsMargins(28, 24, 28, 16); rl->setSpacing(0);
+    // ── Right ─────────────────────────────────────────────────────────────
+    auto* right = new QFrame(this); right->setFrameShape(QFrame::NoFrame);
+    auto* rl = new QVBoxLayout(right);
+    rl->setContentsMargins(28,24,28,12); rl->setSpacing(0);
 
     m_stack = new QStackedWidget(this);
     rl->addWidget(m_stack, 1);
 
-    // Separator line above buttons
-    auto* btnSep = new QFrame(this); btnSep->setFrameShape(QFrame::HLine);
-    rl->addWidget(btnSep);
-    rl->addSpacing(8);
+    auto* bl = new QFrame(this); bl->setFrameShape(QFrame::HLine);
+    rl->addWidget(bl); rl->addSpacing(10);
 
-    // Button bar
-    auto* br = new QHBoxLayout; br->setSpacing(8); br->addStretch();
-    m_backBtn   = new QPushButton(tr("< 上一步(&B)"), this);
-    m_nextBtn   = new QPushButton(tr("下一步(&N) >"), this);
-    m_cancelBtn = new QPushButton(tr("取消"), this);
-    m_backBtn->setMinimumWidth(110); m_nextBtn->setMinimumWidth(110); m_cancelBtn->setMinimumWidth(80);
-    m_nextBtn->setDefault(true);
-    br->addWidget(m_backBtn); br->addWidget(m_nextBtn); br->addWidget(m_cancelBtn);
-    rl->addLayout(br);
+    auto* btns = new QHBoxLayout; btns->setSpacing(8); btns->addStretch();
+    m_btnBack   = new QPushButton(tr("< 上一步(&B)"), this);
+    m_btnNext   = new QPushButton(tr("下一步(&N) >"), this);
+    m_btnCancel = new QPushButton(tr("取消"), this);
+    m_btnBack->setMinimumWidth(110); m_btnNext->setMinimumWidth(110);
+    m_btnCancel->setMinimumWidth(80); m_btnNext->setDefault(true);
+    btns->addWidget(m_btnBack); btns->addWidget(m_btnNext); btns->addWidget(m_btnCancel);
+    rl->addLayout(btns);
+    h->addWidget(right, 1);
 
-    ml->addWidget(rp, 1);
+    connect(m_btnBack,   &QPushButton::clicked, this, &InstallWizard::onWizardBack);
+    connect(m_btnNext,   &QPushButton::clicked, this, &InstallWizard::onWizardNext);
+    connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
 
-    connect(m_backBtn,   &QPushButton::clicked, this, &InstallWizard::onBack);
-    connect(m_nextBtn,   &QPushButton::clicked, this, &InstallWizard::onNext);
-    connect(m_cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-
+    // Pages
     if (m_mode == Install) {
-        m_stack->addWidget(buildWelcomePage());
-        m_stack->addWidget(buildLicensePage());
-        m_stack->addWidget(buildPathPage());
-        m_stack->addWidget(buildProgressPage());
-        m_stack->addWidget(buildFinishPage());
+        m_stack->addWidget(pageWelcome());
+        m_stack->addWidget(pageLicense());
+        m_stack->addWidget(pagePath());
+        m_stack->addWidget(pageProgress());
+        m_stack->addWidget(pageFinish());
     } else {
-        m_stack->addWidget(buildUninstallConfirmPage());
-        m_stack->addWidget(buildUninstallProgressPage());
-        m_stack->addWidget(buildUninstallFinishPage());
+        m_stack->addWidget(pageUninstConfirm());
+        m_stack->addWidget(pageUninstProgress());
+        m_stack->addWidget(pageUninstFinish());
     }
 
-    refreshStepIndicator(); navigateTo(0);
+    refreshSteps();
+    m_stack->setCurrentIndex(0);
+    refreshWizardNav();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  Wizard page builders
+//  Wizard pages
 // ═══════════════════════════════════════════════════════════════════════════════
 
-QWidget* InstallWizard::buildWelcomePage()
+QWidget* InstallWizard::pageWelcome()
 {
-    const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString name = inst.value(QStringLiteral("name")).toString();
-    const QString ver  = inst.value(QStringLiteral("version")).toString();
-    const QString pub  = inst.value(QStringLiteral("publisher")).toString();
-    const QString copy = inst.value(QStringLiteral("copyright")).toString();
-    const QString wt   = inst.value(QStringLiteral("welcome_title")).toString();
-    const QString wx   = inst.value(QStringLiteral("welcome_text")).toString();
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    const QString name = inst[QStringLiteral("name")].toString();
+    const QString ver  = inst[QStringLiteral("version")].toString();
+    const QString pub  = inst[QStringLiteral("publisher")].toString();
+    const QString copy = inst[QStringLiteral("copyright")].toString();
+    QString wt = inst[QStringLiteral("welcome_title")].toString();
+    QString wx = inst[QStringLiteral("welcome_text")].toString();
 
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
-
-    auto* t = new QLabel(wt.isEmpty()
-        ? tr("<h3>欢迎使用 %1 安装向导</h3>").arg(name)
-        : QStringLiteral("<h3>%1</h3>").arg(wt), p);
-    t->setWordWrap(true); l->addWidget(t);
-
-    auto* info = new QLabel(wx.isEmpty()
-        ? tr("<p>本向导将引导您完成 <b>%1</b> 的安装。</p>").arg(name) : wx, p);
-    info->setWordWrap(true); l->addWidget(info);
-
-    auto* meta = new QLabel(
-        tr("<p>版本: %1 &nbsp;|&nbsp; 发布者: %2</p>").arg(ver, pub), p);
-    l->addWidget(meta);
-
-    if (!copy.isEmpty()) {
-        auto* c = new QLabel(copy, p); c->setWordWrap(true); c->setStyleSheet(QStringLiteral("color:#888;"));
-        l->addWidget(c);
-    }
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(12);
+    l->addWidget(new QLabel(QStringLiteral("<h3>%1</h3>").arg(
+        wt.isEmpty() ? tr("欢迎使用 %1 安装向导").arg(name) : wt), p));
+    l->addWidget(new QLabel(wx.isEmpty()
+        ? tr("<p>本向导将引导您完成 <b>%1</b> 的安装。</p>").arg(name) : wx, p));
+    auto* info = new QLabel(tr("版本: %1 &nbsp;|&nbsp; 发布者: %2").arg(ver, pub), p);
+    info->setStyleSheet(QStringLiteral("color:#888;"));
+    l->addWidget(info);
+    if (!copy.isEmpty()) { auto* c = new QLabel(copy,p); c->setStyleSheet(QStringLiteral("color:#777;")); l->addWidget(c); }
     l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildLicensePage()
+QWidget* InstallWizard::pageLicense()
 {
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0);
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(8);
     l->addWidget(new QLabel(tr("<b>请阅读以下许可协议：</b>"), p));
-
     auto* e = new QTextEdit(p); e->setReadOnly(true);
     e->setStyleSheet(QStringLiteral("QTextEdit{border:1px solid #555;border-radius:4px;padding:8px;}"));
-    QString lf = m_package.value(QStringLiteral("installer")).toObject()
-                     .value(QStringLiteral("license_file")).toString();
+    QString lf = m_pkg[QStringLiteral("installer")].toObject()[QStringLiteral("license_file")].toString();
     if (!lf.isEmpty()) { QFile f(QStringLiteral(":/package/files/%1").arg(lf));
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text))
-            e->setPlainText(QString::fromUtf8(f.readAll())); }
+        if (f.open(QIODevice::ReadOnly|QIODevice::Text)) e->setPlainText(QString::fromUtf8(f.readAll())); }
     l->addWidget(e, 1);
-
-    m_licenseBox = new QCheckBox(tr("我接受许可协议的条款(&A)"), p);
-    l->addWidget(m_licenseBox);
-    connect(m_licenseBox, &QCheckBox::toggled, this, [this]() { refreshButtons(); });
+    m_chkLicense = new QCheckBox(tr("我接受许可协议的条款(&A)"), p);
+    connect(m_chkLicense, &QCheckBox::toggled, this, [this](){ refreshWizardNav(); });
+    l->addWidget(m_chkLicense);
     return p;
 }
 
-QWidget* InstallWizard::buildPathPage()
+QWidget* InstallWizard::pagePath()
 {
-    const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    QString def = QDir::toNativeSeparators(QDir(InstallerEngine::resolvePath(
-        inst.value(QStringLiteral("default_install_root")).toString()))
-        .absoluteFilePath(inst.value(QStringLiteral("default_install_folder")).toString()));
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    QString def = QDir::toNativeSeparators(
+        QDir(InstallerEngine::resolvePath(inst[QStringLiteral("default_install_root")].toString()))
+            .absoluteFilePath(inst[QStringLiteral("default_install_folder")].toString()));
 
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(10);
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(10);
     l->addWidget(new QLabel(tr("<b>选择安装位置</b>"), p));
     l->addWidget(new QLabel(tr("安装目录:"), p));
-
-    auto* r = new QHBoxLayout();
-    m_pathEdit = new QLineEdit(def, p);
-    m_pathEdit->setStyleSheet(QStringLiteral("QLineEdit{padding:6px;}"));
-    r->addWidget(m_pathEdit, 1);
-
-    auto* b = new QPushButton(tr("浏览(&B)..."), p);
-    connect(b, &QPushButton::clicked, this, [this]() {
-        QString d = QFileDialog::getExistingDirectory(this, tr("选择安装目录"), m_pathEdit->text());
-        if (!d.isEmpty()) m_pathEdit->setText(QDir::toNativeSeparators(d));
+    auto* row = new QHBoxLayout;
+    m_editPath = new QLineEdit(def, p);
+    row->addWidget(m_editPath, 1);
+    auto* btn = new QPushButton(tr("浏览(&B)..."), p);
+    connect(btn, &QPushButton::clicked, this, [this](){
+        QString d = QFileDialog::getExistingDirectory(this, tr("选择安装目录"), m_editPath->text());
+        if (!d.isEmpty()) m_editPath->setText(QDir::toNativeSeparators(d));
     });
-    r->addWidget(b); l->addLayout(r); l->addStretch(); return p;
+    row->addWidget(btn);
+    l->addLayout(row); l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildProgressPage()
+QWidget* InstallWizard::pageProgress()
 {
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(10);
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(10);
     l->addWidget(new QLabel(tr("<b>正在安装...</b>"), p));
-
-    m_statusLabel = new QLabel(tr("正在准备..."), p);
-    m_statusLabel->setWordWrap(true); m_statusLabel->setStyleSheet(QStringLiteral("color:#aaa;"));
-    l->addWidget(m_statusLabel);
-
-    m_progressBar = new QProgressBar(p); m_progressBar->setRange(0, 100);
-    m_progressBar->setValue(0); m_progressBar->setMinimumHeight(18);
-    l->addWidget(m_progressBar);
-
-    // Detail toggle
-    auto* detailBtn = new QPushButton(tr("显示详情 ▸"), p);
-    detailBtn->setFlat(true);
-    m_detailLog = new QTextEdit(p);
-    m_detailLog->setReadOnly(true); m_detailLog->setVisible(false);
-    m_detailLog->setMaximumHeight(120);
-    connect(detailBtn, &QPushButton::clicked, this, [detailBtn, this]() {
-        bool show = !m_detailLog->isVisible();
-        m_detailLog->setVisible(show);
-        detailBtn->setText(show ? tr("隐藏详情 ▾") : tr("显示详情 ▸"));
+    m_lblStatus = new QLabel(tr("正在准备..."), p); m_lblStatus->setStyleSheet(QStringLiteral("color:#aaa;"));
+    l->addWidget(m_lblStatus);
+    m_bar = new QProgressBar(p); m_bar->setRange(0,100); m_bar->setValue(0); m_bar->setMinimumHeight(18);
+    l->addWidget(m_bar);
+    auto* detailBtn = new QPushButton(tr("显示详情 ▸"),p); detailBtn->setFlat(true);
+    m_log = new QTextEdit(p); m_log->setReadOnly(true); m_log->setVisible(false); m_log->setMaximumHeight(120);
+    l->addWidget(detailBtn); l->addWidget(m_log);
+    connect(detailBtn, &QPushButton::clicked, this, [detailBtn,this](){
+        bool vis = !m_log->isVisible(); m_log->setVisible(vis);
+        detailBtn->setText(vis ? tr("隐藏详情 ▾") : tr("显示详情 ▸"));
     });
-    l->addWidget(detailBtn);
-    l->addWidget(m_detailLog);
-
     l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildFinishPage()
+QWidget* InstallWizard::pageFinish()
 {
-    const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString name = inst.value(QStringLiteral("name")).toString();
-    const auto fa = m_package.value(QStringLiteral("finish_actions")).toObject();
-    const bool runDef = fa.value(QStringLiteral("run_program")).toBool(true);
-    const bool restart = fa.value(QStringLiteral("restart_required")).toBool(false);
-    QString ft = inst.value(QStringLiteral("finish_title")).toString();
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    const QString name = inst[QStringLiteral("name")].toString();
+    const auto& fa = m_pkg[QStringLiteral("finish_actions")].toObject();
+    bool runDef = fa[QStringLiteral("run_program")].toBool(true);
+    bool restart = fa[QStringLiteral("restart_required")].toBool(false);
+    QString ft = inst[QStringLiteral("finish_title")].toString();
 
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
-    l->addWidget(new QLabel(QStringLiteral("<h3>%1</h3>").arg(
-        ft.isEmpty() ? tr("安装完成") : ft), p));
-
-    QString fm = m_package.value(QStringLiteral("finish_message")).toString();
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(12);
+    l->addWidget(new QLabel(QStringLiteral("<h3>%1</h3>").arg(ft.isEmpty()?tr("安装完成"):ft), p));
+    QString fm = m_pkg[QStringLiteral("finish_message")].toString();
     if (fm.isEmpty()) fm = tr("%1 已成功安装。").arg(name);
     fm.replace(QStringLiteral("{name}"), name);
-    auto* msg = new QLabel(fm, p); msg->setWordWrap(true);
-    l->addWidget(msg);
-
-    if (restart) {
-        auto* rh = new QLabel(tr("<b>注意：</b>建议重新启动计算机以完成安装。"), p);
-        rh->setWordWrap(true); l->addWidget(rh);
-    }
-
-    m_runCheckBox = new QCheckBox(tr("运行 %1(&R)").arg(name), p);
-    m_runCheckBox->setChecked(runDef); l->addWidget(m_runCheckBox);
+    l->addWidget(new QLabel(fm, p));
+    if (restart) l->addWidget(new QLabel(tr("<b>注意：</b>建议重新启动计算机以完成安装。"), p));
+    l->addSpacing(8);
+    m_chkRun = new QCheckBox(tr("运行 %1(&R)").arg(name), p); m_chkRun->setChecked(runDef);
+    l->addWidget(m_chkRun);
     l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildUninstallConfirmPage()
+QWidget* InstallWizard::pageUninstConfirm()
 {
-    const QString name = m_package.value(QStringLiteral("installer")).toObject()
-                             .value(QStringLiteral("name")).toString();
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
+    const QString name = m_pkg[QStringLiteral("installer")].toObject()[QStringLiteral("name")].toString();
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(12);
     l->addWidget(new QLabel(tr("<h3>卸载 %1</h3>").arg(name), p));
-    l->addWidget(new QLabel(tr("<p>确定要卸载 <b>%1</b> 吗？</p>"
-                               "<p>安装目录: %2</p>"
-                               "<p>此操作将删除所有程序文件和相关设置。</p>")
-        .arg(name, QDir::toNativeSeparators(m_uninstallDir)), p));
+    l->addWidget(new QLabel(tr("<p>确定要卸载 <b>%1</b> 吗？</p><p>安装目录: %2</p>"
+        "<p>此操作将删除所有程序文件和设置。</p>").arg(name, QDir::toNativeSeparators(m_uninstDir)), p));
     l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildUninstallProgressPage()
+QWidget* InstallWizard::pageUninstProgress()
 {
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(10);
     l->addWidget(new QLabel(tr("<b>正在卸载...</b>"), p));
-    m_statusLabel = new QLabel(tr("正在准备..."), p); m_statusLabel->setWordWrap(true);
-    l->addWidget(m_statusLabel);
-    m_progressBar = new QProgressBar(p); m_progressBar->setRange(0,100);
-    m_progressBar->setValue(0); m_progressBar->setMinimumHeight(20);
-    l->addWidget(m_progressBar); l->addStretch(); return p;
+    m_lblStatus = new QLabel(tr("正在准备..."), p); m_lblStatus->setStyleSheet(QStringLiteral("color:#aaa;"));
+    l->addWidget(m_lblStatus);
+    m_bar = new QProgressBar(p); m_bar->setRange(0,100); m_bar->setValue(0); m_bar->setMinimumHeight(18);
+    l->addWidget(m_bar);
+    l->addStretch(); return p;
 }
 
-QWidget* InstallWizard::buildUninstallFinishPage()
+QWidget* InstallWizard::pageUninstFinish()
 {
-    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p);
-    l->setContentsMargins(0, 0, 0, 0); l->setSpacing(12);
+    auto* p = new QWidget(this); auto* l = new QVBoxLayout(p); l->setSpacing(12);
     l->addWidget(new QLabel(tr("<h3>卸载完成</h3>"), p));
     l->addWidget(new QLabel(tr("程序已从您的计算机中移除。"), p));
     l->addStretch(); return p;
@@ -429,164 +354,149 @@ QWidget* InstallWizard::buildUninstallFinishPage()
 //  Navigation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void InstallWizard::navigateTo(int step)
+void InstallWizard::refreshSteps()
 {
-    if (step < 0 || step >= m_stack->count()) return;
-    m_currentStep = step; m_stack->setCurrentIndex(step);
-    refreshStepIndicator(); refreshButtons();
-}
+    QLayoutItem* ci;
+    while ((ci = m_stepLayout->takeAt(0)) != nullptr) { delete ci->widget(); delete ci; }
 
-void InstallWizard::onBack() { if (m_currentStep > 0) navigateTo(m_currentStep - 1); }
-
-void InstallWizard::onNext()
-{
-    if (m_currentStep >= m_stack->count() - 1) { accept(); return; }
-    if (m_mode == Install && m_currentStep == 2) { startInstallation(m_pathEdit->text()); return; }
-    if (m_mode == Uninstall && m_currentStep == 0) {
-        auto* e = new InstallerEngine; auto* t = new QThread(this);
-        e->loadPackage(); e->moveToThread(t);
-        connect(e, &InstallerEngine::progressChanged, this, &InstallWizard::onProgressChanged);
-        connect(e, &InstallerEngine::statusChanged,   this, &InstallWizard::onStatusChanged);
-        connect(e, &InstallerEngine::finished,         this, &InstallWizard::onFinished);
-        navigateTo(1);
-        QString d = m_uninstallDir;
-        connect(t, &QThread::started, e, [e,d]() { e->uninstall(d); });
-        connect(e, &InstallerEngine::finished, t, [t,e]() { e->deleteLater(); t->quit(); });
-        connect(t, &QThread::finished, t, &QObject::deleteLater);
-        t->start(); return;
-    }
-    navigateTo(m_currentStep + 1);
-}
-
-void InstallWizard::refreshButtons()
-{
-    int last = m_stack->count() - 1;
-    bool first = (m_currentStep == 0), lastP = (m_currentStep >= last);
-    bool prog = (m_mode == Install && m_currentStep == 3) || (m_mode == Uninstall && m_currentStep == 1);
-
-    m_backBtn->setVisible(!first && !prog);
-    m_nextBtn->setEnabled(true);
-
-    if (prog) {
-        m_nextBtn->setVisible(false);
-    } else if (lastP) {
-        m_nextBtn->setText(tr("完成(&F)")); m_nextBtn->setVisible(true);
-    } else if ((m_mode == Install && m_currentStep == 2) || (m_mode == Uninstall && m_currentStep == 0)) {
-        m_nextBtn->setText((m_mode == Install) ? tr("安装(&I)") : tr("卸载(&U)"));
-        m_nextBtn->setVisible(true);
-    } else {
-        m_nextBtn->setText(tr("下一步(&N) >")); m_nextBtn->setVisible(true);
-    }
-
-    if (m_mode == Install && m_currentStep == 1 && m_licenseBox)
-        m_nextBtn->setEnabled(m_licenseBox->isChecked());
-
-    m_cancelBtn->setVisible(!lastP && !prog);
-}
-
-void InstallWizard::refreshStepIndicator()
-{
-    QLayoutItem* c;
-    while ((c = m_stepLayout->takeAt(0)) != nullptr) { delete c->widget(); delete c; }
-
-    const QStringList& steps = (m_mode == Install) ? m_installSteps : m_uninstallSteps;
-    for (int i = 0; i < steps.size(); i++) {
+    for (int i = 0; i < m_steps.size(); i++) {
         auto* row = new QHBoxLayout; row->setSpacing(10);
-
-        auto* icon = new QLabel(this); icon->setFixedWidth(20); icon->setAlignment(Qt::AlignCenter);
-        QString color;
-        if (i == m_currentStep)      { icon->setText(QStringLiteral("\u25CF")); color = QStringLiteral("#2196f3"); }
-        else                         { icon->setText(QStringLiteral("\u25CB")); color = QStringLiteral("#666"); }
-        icon->setStyleSheet(QStringLiteral("color:%1;font-size:14px;font-weight:bold;").arg(color));
-        row->addWidget(icon);
-
-        auto* label = new QLabel(steps[i], this);
-        if (i == m_currentStep)
-            label->setStyleSheet(QStringLiteral("color:#fff;font-weight:bold;"));
-        else
-            label->setStyleSheet(QStringLiteral("color:#888;"));
-        row->addWidget(label, 1); row->addStretch();
+        auto* dot = new QLabel(this); dot->setFixedWidth(18); dot->setAlignment(Qt::AlignCenter);
+        bool cur = (i == m_step);
+        dot->setText(cur ? QStringLiteral("\u25CF") : QStringLiteral("\u25CB"));
+        dot->setStyleSheet(QStringLiteral("color:%1;font-size:13px;font-weight:bold;")
+            .arg(cur ? QStringLiteral("#2196f3") : QStringLiteral("#555")));
+        row->addWidget(dot);
+        auto* lb = new QLabel(m_steps[i], this);
+        lb->setStyleSheet(QStringLiteral("color:%1;%2").arg(cur ? QStringLiteral("#fff") : QStringLiteral("#888"),
+            cur ? QStringLiteral("font-weight:bold;") : QString()));
+        row->addWidget(lb, 1); row->addStretch();
         m_stepLayout->addLayout(row);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Shared
-// ═══════════════════════════════════════════════════════════════════════════════
-
-void InstallWizard::startInstallation(const QString& installDir)
+void InstallWizard::refreshWizardNav()
 {
-    const bool forceAdmin = m_package.value(QStringLiteral("installer")).toObject()
-                                .value(QStringLiteral("requires_admin")).toBool(false);
-    const bool needsAdmin = forceAdmin || !InstallerEngine::canWriteToDir(installDir);
+    int last = m_stack->count() - 1;
+    bool first = (m_step == 0), lastP = (m_step >= last);
+    bool progress = (m_mode==Install && m_step==3) || (m_mode==Uninstall && m_step==1);
 
-    if (needsAdmin) {
-        bool ok = InstallerEngine::elevateSelf(installDir, m_package);
-        if (ok) {
-            if (m_style == OneClick) {
-                m_ocStatusLabel->setText(tr("安装完成！"));
-                m_ocProgressBar->setValue(100);
-            } else { navigateTo(4); }
+    m_btnBack->setVisible(!first && !progress);
+    m_btnCancel->setVisible(!lastP && !progress);
+    m_btnNext->setEnabled(true);
+    m_btnNext->setVisible(true);
+
+    if (progress) {
+        m_btnNext->setVisible(false);
+    } else if (lastP) {
+        m_btnNext->setText(tr("完成(&F)"));
+    } else if ((m_mode==Install && m_step==2) || (m_mode==Uninstall && m_step==0)) {
+        m_btnNext->setText((m_mode==Install) ? tr("安装(&I)") : tr("卸载(&U)"));
+    } else {
+        m_btnNext->setText(tr("下一步(&N) >"));
+    }
+
+    // License acceptance
+    if (m_mode==Install && m_step==1 && m_chkLicense)
+        m_btnNext->setEnabled(m_chkLicense->isChecked());
+}
+
+void InstallWizard::onWizardBack()
+{
+    if (m_step > 0) { m_step--; m_stack->setCurrentIndex(m_step); refreshSteps(); refreshWizardNav(); }
+}
+
+void InstallWizard::onWizardNext()
+{
+    int last = m_stack->count() - 1;
+    if (m_step >= last) { accept(); return; }
+
+    // Install path → start install
+    if (m_mode==Install && m_step==2) {
+        m_step = 3; m_stack->setCurrentIndex(m_step); refreshSteps(); refreshWizardNav();
+        startInstall(m_editPath->text());
+        return;
+    }
+    // Uninstall confirm → start uninstall
+    if (m_mode==Uninstall && m_step==0) {
+        m_step = 1; m_stack->setCurrentIndex(m_step); refreshSteps(); refreshWizardNav();
+        auto* eng = new InstallerEngine; auto* thr = new QThread(this);
+        eng->loadPackage(); eng->moveToThread(thr);
+        connect(eng,&InstallerEngine::progressChanged,this,&InstallWizard::onProgress);
+        connect(eng,&InstallerEngine::statusChanged,this,&InstallWizard::onStatus);
+        connect(eng,&InstallerEngine::finished,this,&InstallWizard::onEngineFinished);
+        QString d = m_uninstDir;
+        connect(thr,&QThread::started,eng,[eng,d](){ eng->uninstall(d); });
+        connect(eng,&InstallerEngine::finished,thr,[thr,eng](){ eng->deleteLater(); thr->quit(); });
+        connect(thr,&QThread::finished,thr,&QObject::deleteLater);
+        thr->start(); return;
+    }
+
+    m_step++; m_stack->setCurrentIndex(m_step); refreshSteps(); refreshWizardNav();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Install
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void InstallWizard::startInstall(const QString& dir)
+{
+    const auto& inst = m_pkg[QStringLiteral("installer")].toObject();
+    bool force = inst[QStringLiteral("requires_admin")].toBool(false);
+    if (force || !InstallerEngine::canWriteToDir(dir)) {
+        if (InstallerEngine::elevateSelf(dir, m_pkg)) {
             QMessageBox::information(this, tr("完成"),
-                m_package.value(QStringLiteral("finish_message")).toString());
-            accept();
-        } else {
-            QMessageBox::critical(this, tr("错误"), tr("需要管理员权限但无法提升。"));
+                m_pkg[QStringLiteral("finish_message")].toString());
+            accept(); return;
         }
+        QMessageBox::critical(this, tr("错误"), tr("需要管理员权限但无法提升。"));
         return;
     }
 
-    if (m_style == Wizard) navigateTo(3);
-
-    auto* engine = new InstallerEngine(); auto* thread = new QThread(this);
-    engine->loadPackage(); engine->moveToThread(thread);
-    connect(engine, &InstallerEngine::progressChanged, this, &InstallWizard::onProgressChanged);
-    connect(engine, &InstallerEngine::statusChanged,   this, &InstallWizard::onStatusChanged);
-    connect(engine, &InstallerEngine::finished,         this, &InstallWizard::onFinished);
-    connect(thread, &QThread::started, engine, [engine, installDir]() { engine->install(installDir); });
-    connect(engine, &InstallerEngine::finished, thread, [thread,engine](){ engine->deleteLater(); thread->quit(); });
-    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-    thread->start();
+    auto* eng = new InstallerEngine; auto* thr = new QThread(this);
+    eng->loadPackage(); eng->moveToThread(thr);
+    connect(eng,&InstallerEngine::progressChanged,this,&InstallWizard::onProgress);
+    connect(eng,&InstallerEngine::statusChanged,this,&InstallWizard::onStatus);
+    connect(eng,&InstallerEngine::finished,this,&InstallWizard::onEngineFinished);
+    connect(thr,&QThread::started,eng,[eng,dir](){ eng->install(dir); });
+    connect(eng,&InstallerEngine::finished,thr,[thr,eng](){ eng->deleteLater(); thr->quit(); });
+    connect(thr,&QThread::finished,thr,&QObject::deleteLater);
+    thr->start();
 }
 
-void InstallWizard::onProgressChanged(int percent)
+void InstallWizard::onProgress(int pct)
 {
-    if (m_style == OneClick) { if (m_ocProgressBar) m_ocProgressBar->setValue(percent); }
-    else { if (m_progressBar) m_progressBar->setValue(percent); }
+    if (m_style==OneClick && m_ocBar) m_ocBar->setValue(pct);
+    if (m_bar) m_bar->setValue(pct);
 }
 
-void InstallWizard::onStatusChanged(const QString& text)
+void InstallWizard::onStatus(const QString& msg)
 {
-    if (m_style == OneClick) { if (m_ocStatusLabel) m_ocStatusLabel->setText(text); }
-    else {
-        if (m_statusLabel) m_statusLabel->setText(text);
-        if (m_detailLog && m_detailLog->isVisible())
-            m_detailLog->append(text);
-    }
+    if (m_style==OneClick && m_ocStatus) m_ocStatus->setText(msg);
+    if (m_lblStatus) m_lblStatus->setText(msg);
+    if (m_log && m_log->isVisible()) m_log->append(msg);
 }
 
-void InstallWizard::onFinished(bool success, const QString& error)
+void InstallWizard::onEngineFinished(bool ok, const QString& err)
 {
-    if (!success) { QMessageBox::critical(this, tr("安装失败"), error); return; }
+    if (!ok) { QMessageBox::critical(this, tr("错误"), err); return; }
     if (m_style == OneClick) {
-        QMessageBox::information(this, tr("完成"),
-            m_package.value(QStringLiteral("finish_message")).toString());
+        QMessageBox::information(this, tr("完成"), m_pkg[QStringLiteral("finish_message")].toString());
         accept();
     } else {
-        if (m_progressBar) m_progressBar->setValue(100);
-        if (m_statusLabel) m_statusLabel->setText(tr("安装完成！"));
-        m_backBtn->setVisible(false); m_cancelBtn->setVisible(false);
-        m_nextBtn->setText(tr("完成(&F)")); m_nextBtn->setVisible(true); m_nextBtn->setEnabled(true);
+        m_lblStatus->setText(tr("完成！"));
+        m_bar->setValue(100);
+        m_btnBack->setVisible(false); m_btnCancel->setVisible(false);
+        m_btnNext->setText(tr("完成(&F)")); m_btnNext->setVisible(true); m_btnNext->setEnabled(true);
     }
 }
 
 void InstallWizard::done(int result)
 {
-    if (result == QDialog::Accepted && m_mode == Install && m_runCheckBox && m_runCheckBox->isChecked()) {
-        QString dir = (m_style == OneClick) ? m_ocPathEdit->text() : m_pathEdit->text();
+    if (result == QDialog::Accepted && m_mode == Install && m_chkRun && m_chkRun->isChecked()) {
+        QString dir = (m_style == OneClick) ? m_ocPath->text() : m_editPath->text();
         QString exe = QDir(dir).absoluteFilePath(
-            m_package.value(QStringLiteral("installer")).toObject()
-                .value(QStringLiteral("main_executable")).toString());
+            m_pkg[QStringLiteral("installer")].toObject()[QStringLiteral("main_executable")].toString());
         if (QFile::exists(exe)) QProcess::startDetached(exe, {}, dir);
     }
     QDialog::done(result);
