@@ -276,30 +276,38 @@ void InstallWizard::refreshStepIndicator()
 QWidget* InstallWizard::buildWelcomePage()
 {
     const QJsonObject inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString name = inst.value(QStringLiteral("name")).toString();
-    const QString ver  = inst.value(QStringLiteral("version")).toString();
-    const QString pub  = inst.value(QStringLiteral("publisher")).toString();
-    const QString customWelcome = inst.value(QStringLiteral("welcome_text")).toString();
+    const QString name     = inst.value(QStringLiteral("name")).toString();
+    const QString ver      = inst.value(QStringLiteral("version")).toString();
+    const QString pub      = inst.value(QStringLiteral("publisher")).toString();
+    const QString copy     = inst.value(QStringLiteral("copyright")).toString();
+    const QString wtitle   = inst.value(QStringLiteral("welcome_title")).toString();
+    const QString wtext    = inst.value(QStringLiteral("welcome_text")).toString();
 
     auto* page = new QWidget(this);
     auto* lay  = new QVBoxLayout(page);
     lay->setContentsMargins(0, 10, 0, 10);
 
-    auto* title = new QLabel(tr("<h2>欢迎使用 %1 安装向导</h2>").arg(name), page);
+    auto* title = new QLabel(wtitle.isEmpty()
+        ? tr("<h2>欢迎使用 %1 安装向导</h2>").arg(name)
+        : QStringLiteral("<h2>%1</h2>").arg(wtitle), page);
     title->setWordWrap(true);
     lay->addWidget(title);
 
-    if (!customWelcome.isEmpty()) {
-        auto* custom = new QLabel(customWelcome, page);
-        custom->setWordWrap(true);
-        lay->addWidget(custom);
-    }
-
-    auto* info = new QLabel(
-        tr("<p>本向导将引导您完成 <b>%1</b> 的安装。</p>"
-           "<p>版本: %2<br>发布者: %3</p>").arg(name, ver, pub), page);
+    auto* info = new QLabel(wtext.isEmpty()
+        ? tr("<p>本向导将引导您完成 <b>%1</b> 的安装。</p>").arg(name) : wtext, page);
     info->setWordWrap(true);
     lay->addWidget(info);
+
+    auto* verLabel = new QLabel(
+        tr("<p>版本: %1 &nbsp;|&nbsp; 发布者: %2</p>").arg(ver, pub), page);
+    verLabel->setWordWrap(true);
+    lay->addWidget(verLabel);
+
+    if (!copy.isEmpty()) {
+        auto* c = new QLabel(copy, page);
+        c->setWordWrap(true);
+        lay->addWidget(c);
+    }
 
     lay->addStretch();
     return page;
@@ -400,27 +408,33 @@ QWidget* InstallWizard::buildProgressPage()
 QWidget* InstallWizard::buildFinishPage()
 {
     const auto inst = m_package.value(QStringLiteral("installer")).toObject();
-    const QString name        = inst.value(QStringLiteral("name")).toString();
-    const bool runDefault     = inst.value(QStringLiteral("run_after_install")).toBool(true);
-    const bool needRestart    = inst.value(QStringLiteral("require_restart")).toBool(false);
+    const QString name     = inst.value(QStringLiteral("name")).toString();
+    const auto fa = m_package.value(QStringLiteral("finish_actions")).toObject();
+    const bool runDefault  = fa.value(QStringLiteral("run_program")).toBool(true);
+    const bool needRestart = fa.value(QStringLiteral("restart_required")).toBool(false);
+    const QString finTitle = inst.value(QStringLiteral("finish_title")).toString();
 
     auto* page = new QWidget(this);
     auto* lay  = new QVBoxLayout(page);
     lay->setContentsMargins(0, 10, 0, 10);
 
-    auto* title = new QLabel(tr("<h2>安装完成</h2>"), page);
+    auto* title = new QLabel(
+        QStringLiteral("<h2>%1</h2>").arg(finTitle.isEmpty() ? tr("安装完成") : finTitle), page);
     lay->addWidget(title);
 
-    auto* msg = new QLabel(
-        m_package.value(QStringLiteral("finish_message")).toString(), page);
+    // Build finish message with variable substitution
+    QString fm = m_package.value(QStringLiteral("finish_message")).toString();
+    if (fm.isEmpty()) fm = tr("%1 已成功安装。").arg(name);
+    fm.replace(QStringLiteral("{name}"), name);
+    auto* msg = new QLabel(fm, page);
     msg->setWordWrap(true);
     lay->addWidget(msg);
 
     if (needRestart) {
-        auto* restartHint = new QLabel(
+        auto* rh = new QLabel(
             tr("<p><b>注意：</b>建议重新启动计算机以完成安装。</p>"), page);
-        restartHint->setWordWrap(true);
-        lay->addWidget(restartHint);
+        rh->setWordWrap(true);
+        lay->addWidget(rh);
     }
 
     lay->addSpacing(16);
@@ -619,11 +633,14 @@ void InstallWizard::done(int result)
 {
     if (result == QDialog::Accepted && m_mode == Install && m_runCheckBox
         && m_runCheckBox->isChecked()) {
+        const auto inst = m_package.value(QStringLiteral("installer")).toObject();
+        const auto fa   = m_package.value(QStringLiteral("finish_actions")).toObject();
         const QString exe = QDir(m_pathEdit->text()).absoluteFilePath(
-            m_package.value(QStringLiteral("installer")).toObject()
-                .value(QStringLiteral("main_executable")).toString());
+            inst.value(QStringLiteral("main_executable")).toString());
+        const QString args = fa.value(QStringLiteral("run_arguments")).toString();
         if (QFile::exists(exe))
-            QProcess::startDetached(exe, {}, m_pathEdit->text());
+            QProcess::startDetached(exe, args.isEmpty() ? QStringList{}
+                : QStringList{args}, m_pathEdit->text());
     }
     QDialog::done(result);
 }

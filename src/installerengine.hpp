@@ -3,24 +3,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
-#include <QStringList>
 
-/// Core installer / uninstaller engine.
-///
-/// Install:
-///   - Read embedded package.json
-///   - Resolve path variables ($LOCALAPPDATA$, $PROGRAMFILES$)
-///   - Copy :/package/files/ → target directory
-///   - Write registry entries
-///   - Create Desktop / StartMenu shortcuts (via Shortcut)
-///   - Optionally restart elevated
-///
-/// Uninstall:
-///   - Remove files from install directory
-///   - Remove shortcuts
-///   - Remove registry entries
-///
-/// The engine is designed to be moved to a worker thread via moveToThread().
 class InstallerEngine : public QObject {
     Q_OBJECT
 
@@ -28,7 +11,6 @@ public:
     explicit InstallerEngine(QObject* parent = nullptr);
     ~InstallerEngine() override = default;
 
-    // ── Package ──────────────────────────────────────────────────────────
     bool loadPackage();
     const QJsonObject& package() const { return m_package; }
 
@@ -37,34 +19,54 @@ public:
     static bool    canWriteToDir(const QString& dirPath);
     static bool    elevateSelf(const QString& installDir,
                                const QJsonObject& package);
-
-    /// Look up an installed application's location from the Windows registry.
     static QString findInstallLocation(const QString& appName);
+    static bool    checkOsVersion(const QString& minVer);
 
-    // ── Accessors ────────────────────────────────────────────────────────
-    QString appName()           const;
-    QString version()           const;
-    QString publisher()         const;
-    QString defaultInstallPath()const;
-    QString mainExecutable()    const;
-    QString licenseText()       const;
-    QString finishMessage()     const;
-    QString startMenuFolder()   const;
-    QString welcomeText()       const;
-    QString appIcon()           const;
-    QString description()       const;
-    QString supportUrl()        const;
-    QString updateUrl()         const;
-    bool    requireAdmin()      const;
-    bool    autoStart()         const;
-    bool    requireRestart()    const;
-    bool    runAfterInstall()   const;
+    // ── Accessors (installer.*) ──────────────────────────────────────────
+    QString appName()             const;
+    QString shortName()           const;
+    QString version()             const;
+    QString publisher()           const;
+    QString copyright()           const;
+    QString website()             const;
+    QString defaultInstallPath()  const;
+    QString mainExecutable()      const;
+    QString licenseText()         const;
+    QString welcomeTitle()        const;
+    QString welcomeText()         const;
+    QString finishTitle()         const;
+    QString finishMessage()       const;
+    QString iconPath()            const;
+    QString bannerImage()         const;
+    bool    requiresAdmin()       const;
+    bool    allowChangePath()     const;
+
+    // ── files_strategy ───────────────────────────────────────────────────
+    QString fileMode()            const;  // "mirror" | "mapping"
+    QString fileOverwrite()       const;  // "ask"|"always"|"never"
+    QStringList fileExclude()     const;
+
+    // ── uninstall ────────────────────────────────────────────────────────
+    QString uninstallString()     const;
+    QString displayIcon()         const;
+    bool    uninstallNoModify()   const;
+    bool    uninstallNoRepair()   const;
+
+    // ── finish_actions ───────────────────────────────────────────────────
+    bool    finishRunProgram()    const;
+    QString finishRunArgs()       const;
+    QString finishOpenReadme()    const;
+    bool    finishRestartRequired() const;
+
+    // ── advanced ─────────────────────────────────────────────────────────
+    bool    advancedCreateUninstaller() const;
+    bool    advancedEnableLogging()     const;
+    bool    advancedSilentInstall()     const;
+    QString advancedMinOsVersion()      const;
+    bool    advanced64BitOnly()         const;
 
 public slots:
-    /// Execute full installation (call from worker thread).
     void install(const QString& installDir);
-
-    /// Execute full uninstallation (call from worker thread).
     void uninstall(const QString& installDir);
 
 signals:
@@ -73,17 +75,22 @@ signals:
     void finished(bool success, const QString& errorText);
 
 private:
-    // ── Install helpers ──────────────────────────────────────────────────
+    // Install steps
     void copyFiles(const QString& installDir, int& step, int totalSteps);
     void writeRegistry(const QString& installDir);
     void createShortcuts(const QString& installDir);
-    void writeUninstallInfo(const QString& installDir);
+    void writeEnvironment(const QString& installDir);
+    void writeFileAssociations(const QString& installDir);
     void deployUninstaller(const QString& installDir);
+    void writeUninstallInfo(const QString& installDir);
 
-    // ── Uninstall helpers ────────────────────────────────────────────────
+    // Uninstall steps  
     void removeFiles(const QString& installDir, int& step, int totalSteps);
     void removeShortcuts(const QString& appName);
     void removeRegistry(const QString& appName);
+    void removeEnvironment(const QString& appName);
+    void removeFileAssociations();
+    void removeAutoStart(const QString& appName);
 
     QJsonObject m_package;
 };
