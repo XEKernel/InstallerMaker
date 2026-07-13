@@ -55,70 +55,90 @@ void InstallWizard::setupOneClick()
         QDir(InstallerEngine::resolvePath(inst[QStringLiteral("default_install_root")].toString()))
             .absoluteFilePath(inst[QStringLiteral("default_install_folder")].toString()));
 
-    setMinimumSize(640, 400); resize(700, 440);
+    setMinimumSize(520, 480); resize(560, 520);
 
-    auto* h = new QHBoxLayout(this); h->setContentsMargins(24,20,24,16); h->setSpacing(24);
+    // Vertical layout: header → options → install button → progress bar (bottom)
+    auto* main = new QVBoxLayout(this);
+    main->setContentsMargins(30, 20, 30, 12); main->setSpacing(0);
 
-    // ── Left ──────────────────────────────────────────────────────────────
-    auto* left = new QVBoxLayout; left->setSpacing(10);
+    // ── Header ──────────────────────────────────────────────────────────
+    auto* title = new QLabel(tr("<h3>%1 %2</h3>").arg(name, ver), this);
+    title->setAlignment(Qt::AlignCenter);
+    main->addWidget(title);
 
-    auto* title = new QLabel(tr("<h3>%1 %2</h3>").arg(name,ver), this);
-    auto* sub   = new QLabel(pub, this); sub->setStyleSheet(QStringLiteral("color:#888;"));
-    left->addWidget(title); left->addWidget(sub);
+    auto* sub = new QLabel(pub, this);
+    sub->setAlignment(Qt::AlignCenter); sub->setStyleSheet(QStringLiteral("color:#888;font-size:11px;"));
+    main->addWidget(sub);
+    main->addSpacing(14);
 
-    auto* s1 = new QFrame(this); s1->setFrameShape(QFrame::HLine); left->addWidget(s1);
-
+    // ── Install path ────────────────────────────────────────────────────
+    auto* pathLabel = new QLabel(tr("安装目录:"), this);
+    main->addWidget(pathLabel);
     auto* pathRow = new QHBoxLayout;
     m_ocPath = new QLineEdit(defPath, this);
     pathRow->addWidget(m_ocPath, 1);
     auto* browse = new QPushButton(tr("浏览..."), this);
-    connect(browse, &QPushButton::clicked, this, [this](){
+    connect(browse, &QPushButton::clicked, this, [this]() {
         QString d = QFileDialog::getExistingDirectory(this, tr("选择安装目录"), m_ocPath->text());
         if (!d.isEmpty()) m_ocPath->setText(QDir::toNativeSeparators(d));
     });
     pathRow->addWidget(browse);
-    left->addWidget(new QLabel(tr("安装目录:"), this));
-    left->addLayout(pathRow);
+    main->addLayout(pathRow);
+    main->addSpacing(12);
 
+    // ── Options ─────────────────────────────────────────────────────────
     auto* optGrp = new QGroupBox(tr("安装选项"), this);
-    auto* optLay = new QVBoxLayout(optGrp);
+    auto* optLay = new QVBoxLayout(optGrp); optLay->setSpacing(6);
     auto* cb1 = new QCheckBox(tr("创建桌面快捷方式"), this); cb1->setChecked(true);
     auto* cb2 = new QCheckBox(tr("创建开始菜单快捷方式"), this); cb2->setChecked(true);
     auto* cb3 = new QCheckBox(tr("开机自启"), this);
     optLay->addWidget(cb1); optLay->addWidget(cb2); optLay->addWidget(cb3);
-    left->addWidget(optGrp);
+    main->addWidget(optGrp);
+    main->addSpacing(10);
 
+    // ── License ─────────────────────────────────────────────────────────
     auto* licRow = new QHBoxLayout;
     m_ocLicense = new QCheckBox(tr("我已阅读并同意"), this);
     licRow->addWidget(m_ocLicense);
     auto* licBtn = new QPushButton(tr("许可协议"), this);
-    licBtn->setFlat(true); licBtn->setStyleSheet(QStringLiteral("color:#06c;text-decoration:underline;border:none;"));
+    licBtn->setFlat(true);
+    licBtn->setStyleSheet(QStringLiteral("color:#06c;text-decoration:underline;border:none;"));
     connect(licBtn, &QPushButton::clicked, this, &InstallWizard::onShowLicense);
     licRow->addWidget(licBtn); licRow->addStretch();
-    left->addLayout(licRow);
-    left->addStretch();
+    main->addLayout(licRow);
 
-    // ── Right ─────────────────────────────────────────────────────────────
-    auto* right = new QVBoxLayout; right->setSpacing(12); right->addStretch();
+    main->addSpacing(16);
 
+    // ── Install button (centered in middle section) ─────────────────────
     m_ocBtn = new QPushButton(tr("立即安装"), this);
-    m_ocBtn->setMinimumSize(160, 120);
-    m_ocBtn->setStyleSheet(QStringLiteral("QPushButton{font-size:16pt;font-weight:bold;padding:20px 40px;border-radius:8px}"));
+    m_ocBtn->setMinimumHeight(48);
+    m_ocBtn->setMaximumWidth(260);
+    m_ocBtn->setStyleSheet(QStringLiteral(
+        "QPushButton{font-size:14pt;font-weight:bold;padding:12px 48px;border-radius:6px}"));
     m_ocBtn->setEnabled(false);
     connect(m_ocBtn, &QPushButton::clicked, this, &InstallWizard::onOneClickGo);
     connect(m_ocLicense, &QCheckBox::toggled, m_ocBtn, &QPushButton::setEnabled);
 
-    auto* ctr = new QHBoxLayout; ctr->addStretch(); ctr->addWidget(m_ocBtn); ctr->addStretch();
-    right->addLayout(ctr);
+    auto* btnRow = new QHBoxLayout;
+    btnRow->addStretch(); btnRow->addWidget(m_ocBtn); btnRow->addStretch();
+    main->addLayout(btnRow);
 
-    m_ocBar = new QProgressBar(this); m_ocBar->setRange(0,100); m_ocBar->setValue(0);
-    m_ocBar->setVisible(false); m_ocBar->setMinimumWidth(200);
-    right->addWidget(m_ocBar);
-    m_ocStatus = new QLabel(this); m_ocStatus->setWordWrap(true); m_ocStatus->setVisible(false);
-    right->addWidget(m_ocStatus);
-    right->addStretch();
+    // ── Push progress bar to bottom ─────────────────────────────────────
+    main->addStretch();
 
-    h->addLayout(left, 3); h->addLayout(right, 2);
+    // ── Status label ────────────────────────────────────────────────────
+    m_ocStatus = new QLabel(this);
+    m_ocStatus->setWordWrap(true); m_ocStatus->setVisible(false);
+    m_ocStatus->setStyleSheet(QStringLiteral("color:#aaa;font-size:11px;"));
+    main->addWidget(m_ocStatus);
+
+    // ── Progress bar (bottom edge) ──────────────────────────────────────
+    m_ocBar = new QProgressBar(this);
+    m_ocBar->setRange(0, 100); m_ocBar->setValue(0);
+    m_ocBar->setVisible(false);
+    m_ocBar->setFixedHeight(6);
+    m_ocBar->setTextVisible(false);
+    main->addWidget(m_ocBar);
 }
 
 void InstallWizard::onShowLicense()
