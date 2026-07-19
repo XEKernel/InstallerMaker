@@ -50,6 +50,7 @@ private:
 
     bool generatePackageJson(const QString& packageDir);
     bool runBuild(const QString& packageDir, const QString& outputDir);
+    void buildFailed();
     QJsonObject collectFormData() const;
     void applyFormData(const QJsonObject& pkg);
     QString templateDir() const;

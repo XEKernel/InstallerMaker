@@ -29,6 +29,7 @@
 #include <QStandardPaths>
 #include <QTabWidget>
 #include <QTextEdit>
+#include <QThread>
 #include <QVBoxLayout>
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -743,35 +744,79 @@ bool Configurator::generatePackageJson(const QString& packageDir)
 
 bool Configurator::runBuild(const QString& packageDir, const QString& outputDir)
 {
-    m_progressBar->setVisible(true); m_generateBtn->setEnabled(false); m_log->clear(); QApplication::processEvents();
-    QString src=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../.."));
-    QString tmp=QStandardPaths::writableLocation(QStandardPaths::TempLocation)+"/InstallerMaker_build";
-    QDir(tmp).removeRecursively(); QDir().mkpath(tmp);
+    m_progressBar->setVisible(true); m_generateBtn->setEnabled(false); m_log->clear();
+    QApplication::processEvents();
 
-    auto run=[this](const QString& d,const QString& p,const QStringList& a)->bool{
-        QProcess proc; proc.setWorkingDirectory(d);
-        QObject::connect(&proc,&QProcess::readyReadStandardOutput,this,[&](){ QString s=QString::fromLocal8Bit(proc.readAllStandardOutput()); if(!s.trimmed().isEmpty()) m_log->append(s.trimmed()); });
-        QObject::connect(&proc,&QProcess::readyReadStandardError,this,[&](){ QString s=QString::fromLocal8Bit(proc.readAllStandardError()); if(!s.trimmed().isEmpty()) m_log->append(s.trimmed()); });
-        QEventLoop loop; QObject::connect(&proc,QOverload<int,QProcess::ExitStatus>::of(&QProcess::finished),&loop,&QEventLoop::quit);
-        proc.start(p,a); if(!proc.waitForStarted(10000)){ m_log->append(tr("[错误] 无法启动: %1").arg(p)); return false; }
-        loop.exec(); return proc.exitCode()==0;
-    };
+    auto* thr = new QThread(this);
+    auto* worker = new QObject;
+    worker->moveToThread(thr);
 
-    m_log->append(tr("═══ 配置 CMake... ═══")); QApplication::processEvents();
-    if(!run(tmp,QStringLiteral("cmake"),{QStringLiteral("-G"),QStringLiteral("Ninja"),QStringLiteral("-DCMAKE_BUILD_TYPE=Release"),QStringLiteral("-DPACKAGE_DIR=%1").arg(packageDir),src})) goto fail;
+    connect(thr, &QThread::started, worker, [worker, this, packageDir, outputDir]() {
+        auto log = [this](const QString& s) {
+            QMetaObject::invokeMethod(this, [this, s](){ m_log->append(s); }, Qt::QueuedConnection);
+        };
+        auto run = [&](const QString& d, const QString& p, const QStringList& a) -> bool {
+            QProcess proc; proc.setWorkingDirectory(d);
+            proc.start(p, a);
+            if (!proc.waitForStarted(10000)) { log(tr("[错误] 无法启动: %1").arg(p)); return false; }
+            while (proc.waitForReadyRead(100)) {
+                QString out = QString::fromLocal8Bit(proc.readAllStandardOutput());
+                if (!out.trimmed().isEmpty()) log(out.trimmed());
+                QString err = QString::fromLocal8Bit(proc.readAllStandardError());
+                if (!err.trimmed().isEmpty()) log(err.trimmed());
+            }
+            proc.waitForFinished(-1);
+            return proc.exitCode() == 0;
+        };
 
-    m_log->append(tr("═══ 编译... ═══")); QApplication::processEvents();
-    if(!run(tmp,QStringLiteral("cmake"),{QStringLiteral("--build"),QStringLiteral("."),QStringLiteral("--config"),QStringLiteral("Release")})) goto fail;
+        QString src = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../..");
+        QString tmp = QDir::tempPath() + "/InstallerMaker_build";
+        QDir(tmp).removeRecursively(); QDir().mkpath(tmp);
 
-    { QString s=tmp+"/Setup.exe",d=outputDir+"/Setup.exe"; if(QFile::exists(s)){ if(QFile::exists(d)) QFile::remove(d); QFile::copy(s,d); m_log->append(tr("═══ 完成! ═══\n%1").arg(QDir::toNativeSeparators(d))); }
-      else{ m_log->append(tr("[错误] 未找到 Setup.exe")); goto fail; } }
-    QDir(tmp).removeRecursively();
-    m_progressBar->setVisible(false); m_generateBtn->setEnabled(true);
-    QMessageBox::information(this,tr("成功"),tr("安装程序已生成:\n%1").arg(QDir::toNativeSeparators(outputDir+"/Setup.exe")));
+        log(tr("═══ 配置 CMake... ═══"));
+        if (!run(tmp, QStringLiteral("cmake"),
+                 {QStringLiteral("-G"), QStringLiteral("Ninja"),
+                  QStringLiteral("-DCMAKE_BUILD_TYPE=Release"),
+                  QStringLiteral("-DPACKAGE_DIR=%1").arg(packageDir), src})) {
+            QMetaObject::invokeMethod(this, [this](){ buildFailed(); }, Qt::QueuedConnection);
+            worker->deleteLater(); return;
+        }
+
+        log(tr("═══ 编译... ═══"));
+        if (!run(tmp, QStringLiteral("cmake"),
+                 {QStringLiteral("--build"), QStringLiteral("."), QStringLiteral("--config"), QStringLiteral("Release")})) {
+            QMetaObject::invokeMethod(this, [this](){ buildFailed(); }, Qt::QueuedConnection);
+            worker->deleteLater(); return;
+        }
+
+        QString exe = tmp + "/Setup.exe", out = outputDir + "/Setup.exe";
+        if (QFile::exists(exe)) {
+            if (QFile::exists(out)) QFile::remove(out);
+            QFile::copy(exe, out);
+            QDir(tmp).removeRecursively();
+            QMetaObject::invokeMethod(this, [this, out](){
+                m_log->append(tr("═══ 完成! ═══\n%1").arg(QDir::toNativeSeparators(out)));
+                m_progressBar->setVisible(false); m_generateBtn->setEnabled(true);
+                QMessageBox::information(this, tr("成功"), tr("安装程序已生成:\n%1").arg(QDir::toNativeSeparators(out)));
+            }, Qt::QueuedConnection);
+        } else {
+            log(tr("[错误] 未找到 Setup.exe"));
+            QDir(tmp).removeRecursively();
+            QMetaObject::invokeMethod(this, [this](){ buildFailed(); }, Qt::QueuedConnection);
+        }
+        worker->deleteLater();
+    });
+
+    connect(thr, &QThread::finished, thr, &QObject::deleteLater);
+    connect(thr, &QThread::finished, worker, &QObject::deleteLater);
+    thr->start();
     return true;
-fail:
+}
+
+void Configurator::buildFailed()
+{
     m_progressBar->setVisible(false); m_generateBtn->setEnabled(true);
-    QMessageBox::critical(this,tr("构建失败"),tr("构建失败，请检查日志。")); return false;
+    QMessageBox::critical(this, tr("构建失败"), tr("构建失败，请检查日志。"));
 }
 
 void Configurator::onGenerate()

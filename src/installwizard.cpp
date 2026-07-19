@@ -309,14 +309,11 @@ QWidget* InstallWizard::pageProgress()
     l->addWidget(m_lblStatus);
     m_bar = new QProgressBar(p); m_bar->setRange(0,100); m_bar->setValue(0); m_bar->setMinimumHeight(18);
     l->addWidget(m_bar);
-    auto* detailBtn = new QPushButton(tr("显示详情 ▸"),p); detailBtn->setFlat(true);
-    m_log = new QTextEdit(p); m_log->setReadOnly(true); m_log->setVisible(false); m_log->setMaximumHeight(120);
-    l->addWidget(detailBtn); l->addWidget(m_log);
-    connect(detailBtn, &QPushButton::clicked, this, [detailBtn,this](){
-        bool vis = !m_log->isVisible(); m_log->setVisible(vis);
-        detailBtn->setText(vis ? tr("隐藏详情 ▾") : tr("显示详情 ▸"));
-    });
-    l->addStretch(); return p;
+    // Detail log always visible
+    m_log = new QTextEdit(p); m_log->setReadOnly(true);
+    m_log->setStyleSheet(QStringLiteral("QTextEdit{border:1px solid #444;border-radius:4px;padding:6px;font-size:11px;}"));
+    l->addWidget(m_log, 1);
+    return p;
 }
 
 QWidget* InstallWizard::pageFinish()
@@ -494,7 +491,7 @@ void InstallWizard::onStatus(const QString& msg)
 {
     if (m_style==OneClick && m_ocStatus) m_ocStatus->setText(msg);
     if (m_lblStatus) m_lblStatus->setText(msg);
-    if (m_log && m_log->isVisible()) m_log->append(msg);
+    if (m_log) m_log->append(msg);
 }
 
 void InstallWizard::onEngineFinished(bool ok, const QString& err)

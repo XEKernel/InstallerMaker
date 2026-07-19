@@ -447,6 +447,8 @@ void InstallerEngine::silentUpdate(const QString& installDir)
 
 void InstallerEngine::install(const QString& installDir)
 {
+    QDir().mkpath(installDir);  // ensure target directory exists
+
     int fileCount = 0;
     {
         QDirIterator it(QStringLiteral(":/package/files/"),
